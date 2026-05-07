@@ -1,0 +1,6 @@
+{
+  "name": "diagram-mismatch",
+  "description": "Phase 2E fixture. PR description claims (via Mermaid sequence diagram) the patch wires up subtraction, but the diff actually inverts addition. Triggers a Court Reporter divergence exhibit.",
+  "language": "typescript",
+  "linesChanged": 1
+}

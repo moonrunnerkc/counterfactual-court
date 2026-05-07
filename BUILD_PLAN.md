@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A+2B+2C+2D complete; 2E in progress
+**Phase:** 2A-2E complete; 2F (bench) deferred for explicit go-ahead, 2G (replay hardening) pending
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A-D: Evidence Graph, Precedent Ledger, Monorepo Impact Tracing, and UCB1 Budget Allocator landed behind `features.*` flags (default off so Phase 1 regression gate stays bit-identical). 2D ships UCB1 over three arms (prosecution-rollout / defense-rebuttal / jury-round) with the trace embedded in the bundle and covered by the bundle id hash; ADR-003 documents the reward signal. 167 unit/integration tests green (+19 across ucb-bandit, budget-orchestrator, bundle-trace round-trip).
+**One-line:** Phase 1 closed. Phase 2A-2E landed behind `features.*` flags (default off; Phase 1 regression gate intact). 2A: content-addressed Evidence Graph. 2B: precedent ledger with TS-AST cosine similarity + justification enforcement. 2C: import-graph ripple set with citation enforcement. 2D: UCB1 bandit over three arms with allocation trace embedded in the bundle; ADR-003 documents reward signal. 2E: Court Reporter extracts Mermaid blocks (architecture, sequence, flowchart kinds), graceful ffmpeg fallback for frame-sampled video, diagram-vs-diff divergence exhibits. 183 unit/integration tests green (+16 across mermaid-extract, divergence, video-frames, court-reporter-multimodal).
 
 ## Active Blockers
 
@@ -166,10 +166,10 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2E. Deeper Multimodal
 
-- [ ] Court Reporter handles architecture diagrams (Mermaid renders + free-form)
-- [ ] Court Reporter handles sequence diagrams
-- [ ] Court Reporter handles frame-sampled video (extract N frames, treat as image batch)
-- [ ] Cross-reference: extracted intent vs. actual diff, flagged as exhibit when divergent
+- [x] Court Reporter handles architecture diagrams (Mermaid renders + free-form) (mermaid-extract.ts pulls fenced ```mermaid blocks from the PR description; emitted as `kind=multimodal-extraction` exhibits)
+- [x] Court Reporter handles sequence diagrams (kind detection in mermaid-extract.ts: `sequenceDiagram` is recognized alongside `classDiagram`, `flowchart`, `erDiagram`, `stateDiagram`)
+- [x] Court Reporter handles frame-sampled video (extract N frames, treat as image batch) (`video-frames.ts` shells out to ffmpeg; default 8 frames; gracefully skips with a warning when ffmpeg is missing per the cuts list policy)
+- [x] Cross-reference: extracted intent vs. actual diff, flagged as exhibit when divergent (`divergence.ts` compares symbols-in-diagram vs. symbols-in-patch; emits a `divergence-<idx>` exhibit per non-aligned block; fixture `fixtures/diagram-mismatch/` triggers it: diagram says `sub`/`calculate`, diff does `add`)
 
 ### 2F. MaliciousPatch-Bench
 

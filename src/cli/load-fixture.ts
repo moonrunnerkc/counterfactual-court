@@ -54,6 +54,11 @@ export function loadFixture(projectRoot: string, name: string): OrchestratorInpu
       }
     : {};
 
+  const prDescriptionPath = join(fixtureDir, 'pr-description.md');
+  const prDescriptionField = existsSync(prDescriptionPath)
+    ? { prDescription: readFileSync(prDescriptionPath, 'utf8') }
+    : {};
+
   return {
     fixture: name,
     patch,
@@ -62,6 +67,7 @@ export function loadFixture(projectRoot: string, name: string): OrchestratorInpu
     styleDocs,
     attachments,
     ...monorepoFields,
+    ...prDescriptionField,
   };
 }
 

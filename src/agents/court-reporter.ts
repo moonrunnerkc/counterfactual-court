@@ -1,6 +1,8 @@
 import type { AgentContext } from '../runtime/agent-context.js';
 import { parseJsonResponse } from './parse-json-response.js';
-import { ReporterExhibits } from '../evidence/schema.js';
+import { ReporterExhibits, type ReporterExhibit } from '../evidence/schema.js';
+import { extractMermaidBlocks } from '../multimodal/mermaid-extract.js';
+import { detectDiagramDivergences } from '../multimodal/divergence.js';
 
 /** Default Ollama tag for the Court Reporter. Same model as the Prosecutor; different role. */
 export const COURT_REPORTER_MODEL = 'gemma4:e4b-it-q8_0';
@@ -50,6 +52,17 @@ export function buildCourtReporterPrompt(attachments: readonly PngAttachment[]):
 export interface CourtReporterInput {
   /** PNG attachments. Zero-length is allowed and produces an empty exhibit list. */
   readonly attachments: readonly PngAttachment[];
+  /**
+   * Phase 2E. Optional PR description (Markdown). When present, the Court
+   * Reporter extracts Mermaid blocks and emits one exhibit per block plus a
+   * divergence exhibit when the diagram and diff disagree on symbols.
+   */
+  readonly prDescription?: string;
+  /**
+   * Phase 2E. Optional patch text used as the comparison side of the
+   * diagram-vs-diff divergence detector.
+   */
+  readonly patch?: string;
   /** Caller-supplied context bundling rng, clock, llm, logger, config. */
   readonly ctx: AgentContext;
 }
@@ -67,7 +80,17 @@ export interface CourtReporterInput {
 export async function reportCourt(input: CourtReporterInput): Promise<ReporterExhibits> {
   const { attachments, ctx } = input;
   const log = ctx.logger.child({ agent: 'court-reporter' });
+
+  const diagramExhibits = extractDiagramExhibits(input);
+
   if (attachments.length === 0) {
+    if (diagramExhibits.length > 0) {
+      log.info('agent.skip', {
+        reason: 'no-image-attachments',
+        diagramExhibits: diagramExhibits.length,
+      });
+      return { exhibits: diagramExhibits };
+    }
     log.info('agent.skip', { reason: 'no-attachments' });
     return { exhibits: [] };
   }
@@ -77,6 +100,7 @@ export async function reportCourt(input: CourtReporterInput): Promise<ReporterEx
     model: COURT_REPORTER_MODEL,
     seed,
     attachmentCount: attachments.length,
+    diagramExhibits: diagramExhibits.length,
   });
   const result = await ctx.llm.call({
     model: COURT_REPORTER_MODEL,
@@ -88,11 +112,46 @@ export async function reportCourt(input: CourtReporterInput): Promise<ReporterEx
     seed,
     images: attachments.map((a) => a.base64),
   });
-  const exhibits = parseJsonResponse(result.text, ReporterExhibits, 'court-reporter');
+  const llmExhibits = parseJsonResponse(result.text, ReporterExhibits, 'court-reporter');
+  const merged: ReporterExhibits = {
+    exhibits: [...llmExhibits.exhibits, ...diagramExhibits],
+  };
   log.info('agent.done', {
     promptHash: result.promptHash,
     responseHash: result.responseHash,
-    exhibitCount: exhibits.exhibits.length,
+    exhibitCount: merged.exhibits.length,
   });
+  return merged;
+}
+
+/**
+ * Build the Phase 2E diagram and divergence exhibits without an LLM call.
+ * One exhibit per Mermaid block (kind='multimodal-extraction') plus one
+ * divergence exhibit per block whose symbols don't line up with the diff.
+ */
+function extractDiagramExhibits(input: CourtReporterInput): ReporterExhibit[] {
+  if (input.prDescription === undefined || input.prDescription.length === 0) return [];
+  const blocks = extractMermaidBlocks(input.prDescription);
+  if (blocks.length === 0) return [];
+  const exhibits: ReporterExhibit[] = blocks.map((block) => ({
+    id: `diagram-${block.index}`,
+    attachmentName: `mermaid-${block.kind}-${block.index}.md`,
+    extractedText: block.body,
+    intentSummary: `${block.kind} block extracted from PR description (block ${block.index})`,
+    kind: 'multimodal-extraction',
+  }));
+  if (input.patch !== undefined && input.patch.length > 0) {
+    const divergences = detectDiagramDivergences(input.prDescription, input.patch);
+    for (const div of divergences) {
+      if (!div.diverges) continue;
+      exhibits.push({
+        id: `divergence-${div.blockIndex}`,
+        attachmentName: `divergence-${div.blockIndex}.json`,
+        extractedText: JSON.stringify(div, null, 2),
+        intentSummary: `Diagram-vs-diff divergence on block ${div.blockIndex} (${div.kind}): ${div.diagramOnly.length} diagram-only symbol(s), ${div.diffOnly.length} diff-only symbol(s)`,
+        kind: 'documentation',
+      });
+    }
+  }
   return exhibits;
 }

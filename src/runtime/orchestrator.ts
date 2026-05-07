@@ -29,6 +29,12 @@ export interface OrchestratorInputs {
    */
   readonly monorepoRoot?: string;
   readonly monorepoFiles?: readonly string[];
+  /**
+   * Phase 2E. Optional Markdown PR description; the Court Reporter extracts
+   * Mermaid blocks and surfaces them as exhibits, plus a divergence exhibit
+   * when the diagram and diff disagree on symbols.
+   */
+  readonly prDescription?: string;
 }
 
 /** Dependencies the orchestrator needs to run an end-to-end pipeline. */
@@ -124,7 +130,13 @@ export async function runCourt(
     ctx,
   });
   const defense = await defend({ patch: inputs.patch, dossier: prosecution, ctx });
-  const reporterExhibits = await reportCourt({ attachments: inputs.attachments, ctx });
+  const reporterInput = {
+    attachments: inputs.attachments,
+    ctx,
+    ...(inputs.prDescription === undefined ? {} : { prDescription: inputs.prDescription }),
+    ...(inputs.prDescription === undefined ? {} : { patch: inputs.patch }),
+  };
+  const reporterExhibits = await reportCourt(reporterInput);
   const precedents = ctx.config.features.precedent ? loadPrecedentsFor(ctx, inputs.patch) : [];
   const rippleSet = computeRippleIfRequested(ctx, inputs);
   const juryRippleField = rippleSet === null ? {} : { rippleSet };
