@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A+2B+2C complete; 2D in progress
+**Phase:** 2A+2B+2C+2D complete; 2E in progress
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A: content-addressed Evidence Graph behind `features.evidenceGraph` (default off); graph→opinion inversion; `--graph-only`. Phase 2B: TS-AST-histogram similarity, `~/.gemmacourt/ledger/` content-addressed cache, top-N query above threshold (default 0.85), justification enforcement, `--precedent` flag. Phase 2C: TS-compiler import-graph extraction with re-export edges, BFS ripple-set with depth, `monorepo:<path>` citation enforcement helper, multi-file fixture (5 files), `--impact` flag. 148 unit/integration tests green (+16 across import-graph, impact-trace, jury-impact).
+**One-line:** Phase 1 closed. Phase 2A-D: Evidence Graph, Precedent Ledger, Monorepo Impact Tracing, and UCB1 Budget Allocator landed behind `features.*` flags (default off so Phase 1 regression gate stays bit-identical). 2D ships UCB1 over three arms (prosecution-rollout / defense-rebuttal / jury-round) with the trace embedded in the bundle and covered by the bundle id hash; ADR-003 documents the reward signal. 167 unit/integration tests green (+19 across ucb-bandit, budget-orchestrator, bundle-trace round-trip).
 
 ## Active Blockers
 
@@ -158,10 +158,11 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2D. UCB Bandit Budget Allocator
 
-- [ ] `src/budget/ucb-bandit.ts`: standard UCB1 implementation
-- [ ] `src/budget/orchestrator.ts`: routes the budget across prosecution rollouts, defense rebuttals, jury rounds
-- [ ] CLI flag `--budget 5m | 50m | overnight`
-- [ ] Logged allocation decisions go into the bundle (for replay + audit)
+- [x] `src/budget/ucb-bandit.ts`: standard UCB1 implementation (pure; explores every arm before relying on the mean; ties break by lowest index for determinism)
+- [x] `src/budget/orchestrator.ts`: routes the budget across prosecution rollouts, defense rebuttals, jury rounds (BUDGET_ARMS = three discrete arms; `runBanditLoop` allows overrun by at most one step; safety bound at maxSteps)
+- [x] CLI flag `--budget 5m | 50m | overnight` (parses Ns/Nm/Nh, "overnight"=8h, bare integer seconds; rejects malformed values)
+- [x] Logged allocation decisions go into the bundle (for replay + audit) (`AllocationTrace` zod-validated; bundle id hash now includes the trace; bundle round-trip test asserts the trace survives sign+reload)
+- [x] ADR-003 documents the reward signal (`docs/DECISIONS.md`)
 
 ### 2E. Deeper Multimodal
 

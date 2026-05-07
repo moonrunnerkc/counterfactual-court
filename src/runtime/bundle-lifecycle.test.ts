@@ -209,6 +209,29 @@ describe('bundle lifecycle integration', () => {
     expect(report.fullMatch).toBe(false);
   });
 
+  it('round-trips a bundle that includes the allocation trace (Phase 2D)', async () => {
+    const llm = createStubLlmClient(handle);
+    const ctx = createTestContext(llm, 'budget-integration-seed');
+    const { body } = await runCourt(INPUTS, {
+      ctx,
+      runtimeLock: RUNTIME_LOCK,
+      baseSeed: 'budget-integration-seed',
+      budget: {
+        budgetMs: 100,
+        executor: async () => ({ reward: 0.5, durationMs: 25 }),
+      },
+    });
+    const bundleDir = mkdtempSync(join(tmpdir(), 'cc-bundles-'));
+    const written = writeSignedBundle(body, 'budget-integration-seed', bundleDir);
+    const reloaded = loadSignedBundle(written.path);
+    expect(verifyBundleSignature(reloaded).ok).toBe(true);
+    expect(reloaded.body.allocationTrace).toBeDefined();
+    expect(reloaded.body.allocationTrace!.steps.length).toBeGreaterThan(0);
+    for (const step of reloaded.body.allocationTrace!.steps) {
+      expect(['prosecution-rollout', 'defense-rebuttal', 'jury-round']).toContain(step.arm);
+    }
+  });
+
   it('round-trips a bundle that includes the evidence graph (Phase 2A)', async () => {
     const RAW_GRAPH = {
       exhibits: [

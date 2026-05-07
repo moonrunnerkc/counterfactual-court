@@ -5,6 +5,7 @@ import {
   ProsecutionDossier,
   ReporterExhibits,
 } from '../evidence/schema.js';
+import { AllocationTraceSchema } from '../budget/orchestrator.js';
 import { RuntimeLock } from './runtime-lock.js';
 
 /** Per-LLM-call audit trail kept inside an agent record. */
@@ -70,6 +71,12 @@ export const BundleBody = z.object({
     courtReporter: BundleCourtReporterAgent,
     jury: BundleJuryAgent,
   }),
+  /**
+   * Optional Phase 2D allocation trace. Present on bundles produced under a
+   * `--budget` invocation; absent on Phase 1 / linear bundles so the
+   * regression gate stays bit-identical.
+   */
+  allocationTrace: AllocationTraceSchema.nullable().optional(),
   replayInstructions: z.string(),
 });
 

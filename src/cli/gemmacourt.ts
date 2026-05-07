@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { executeRun } from './run-subcommand.js';
+import { executeRun, parseBudgetSpec } from './run-subcommand.js';
 import { executeReplay } from './replay-subcommand.js';
 import { executeVerify } from './verify-subcommand.js';
 
@@ -59,12 +59,13 @@ export const PACKAGE_VERSION: string = readPackageVersion();
 export const USAGE = `Usage: gemmacourt [--help] [--version] <command> [args]
 
 Commands:
-  run --fixture <name> [--evidence-graph] [--graph-only] [--precedent] [--impact]
+  run --fixture <name> [--evidence-graph] [--graph-only] [--precedent] [--impact] [--budget <spec>]
                                 Run the four agents against fixtures/<name> and write a signed .verdict bundle.
                                 --evidence-graph turns on the Phase 2A graph emission for this run.
                                 --graph-only implies --evidence-graph and prints the graph JSON to stdout instead of the bundle path.
                                 --precedent (Phase 2B) queries the local ledger for prior verdicts and surfaces top matches to the Jury; implies --evidence-graph.
                                 --impact (Phase 2C) builds the import graph for the fixture's src/ tree, surfaces the ripple set to the Jury; implies --evidence-graph.
+                                --budget <spec> (Phase 2D) runs the UCB1 bandit loop after the linear pipeline; spec is "5m", "50m", "2h", "overnight", or a bare integer (seconds). Allocation trace embedded in the bundle.
   replay <bundle> [--tolerate-hash] [--tolerate-runtime]
                                 Re-run a bundle and report whether the response hashes match the recorded ones.
   verify <bundle>               Verify the Ed25519 signature on a bundle. No LLM calls.
@@ -143,12 +144,27 @@ export async function main(argv: readonly string[]): Promise<CliResult> {
     const precedent = rest.includes('--precedent');
     const impact = rest.includes('--impact');
     const enableGraph = graphOnly || rest.includes('--evidence-graph') || precedent || impact;
+    const budgetSpec = findFlagValue(rest, '--budget');
+    let budgetMs: number | undefined;
+    if (budgetSpec !== null && budgetSpec.length > 0) {
+      try {
+        budgetMs = parseBudgetSpec(budgetSpec);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return {
+          code: 2,
+          stdout: '',
+          stderr: `gemmacourt run: invalid --budget value: ${reason}\n`,
+        };
+      }
+    }
     try {
       const outcome = await executeRun({
         fixture,
         forceEvidenceGraph: enableGraph,
         forcePrecedent: precedent,
         forceMonorepoImpact: impact,
+        ...(budgetMs === undefined ? {} : { budgetMs }),
       });
       if (graphOnly) {
         if (outcome.evidenceGraph === null) {

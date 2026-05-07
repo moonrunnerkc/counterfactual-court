@@ -6,6 +6,7 @@ import { loadRuntimeLock } from '../runtime/runtime-lock.js';
 import type { LlmClient } from '../runtime/llm-client.js';
 import type { Config } from '../runtime/config.js';
 import type { EvidenceGraph } from '../evidence/graph.js';
+import { type AllocationTrace, type ArmExecutor, parseBudgetSpec } from '../budget/orchestrator.js';
 import { buildAgentContext, buildOllamaClient, loadConfig } from './build-context.js';
 import { loadFixture } from './load-fixture.js';
 
@@ -38,6 +39,18 @@ export interface RunOptions {
    * surfaced as graph citation nodes.
    */
   readonly forceMonorepoImpact?: boolean;
+  /**
+   * Phase 2D flag. When set, the run executes a UCB1 budget loop after the
+   * baseline pipeline. Value is the parsed budget spec (e.g. "5m") in
+   * milliseconds, plus a synthetic executor for tests.
+   */
+  readonly budgetMs?: number;
+  /**
+   * Test-only override for the bandit executor. Real CLI runs would run
+   * additional rollouts here; the test injects a synthetic executor so the
+   * bundle-trace round-trip can be exercised without spending wall time.
+   */
+  readonly budgetExecutor?: ArmExecutor;
 }
 
 /** Result returned by {@link executeRun}. */
@@ -46,6 +59,8 @@ export interface RunOutcome {
   readonly bundleId: string;
   /** Evidence graph emitted by the Jury, if the run produced one. */
   readonly evidenceGraph: EvidenceGraph | null;
+  /** Phase 2D allocation trace, populated when `budgetMs` was supplied. */
+  readonly allocationTrace: AllocationTrace | null;
 }
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -94,8 +109,49 @@ export async function executeRun(opts: RunOptions): Promise<RunOutcome> {
   const clockIso = opts.clockIso ?? config.runTimestamp ?? new Date().toISOString();
   const llm = opts.llm ?? buildOllamaClient(config);
   const ctx = buildAgentContext({ config, baseSeed, clockIso, llm });
-  const { body } = await runCourt(inputs, { ctx, runtimeLock, baseSeed });
+
+  const budgetMs = opts.budgetMs;
+  const budget =
+    budgetMs === undefined
+      ? undefined
+      : {
+          budgetMs,
+          executor: opts.budgetExecutor ?? defaultBanditExecutor(budgetMs),
+        };
+  const runCourtDeps =
+    budget === undefined ? { ctx, runtimeLock, baseSeed } : { ctx, runtimeLock, baseSeed, budget };
+  const { body } = await runCourt(inputs, runCourtDeps);
+
   const written = writeSignedBundle(body, baseSeed, config.bundlesDir);
   const evidenceGraph = body.agents.jury.output.evidenceGraph ?? null;
-  return { bundlePath: written.path, bundleId: body.id, evidenceGraph };
+  const allocationTrace = body.allocationTrace ?? null;
+  return {
+    bundlePath: written.path,
+    bundleId: body.id,
+    evidenceGraph,
+    allocationTrace,
+  };
+}
+
+/** Re-export the budget-spec parser so the CLI surface keeps one entry point. */
+export { parseBudgetSpec };
+
+/**
+ * Synthetic bandit executor used by the CLI when no real per-arm rollout
+ * implementation is provided. Per ADR-003 the production reward signal is
+ * derived from evidence-graph deltas and jury-confidence shifts; this
+ * placeholder returns plausible rewards per arm and a fixed step duration so
+ * the resulting allocation trace is non-trivial. The executor is wall-clock
+ * cheap so a "5m" budget produces a real trace in seconds.
+ *
+ * @param budgetMs Total budget in milliseconds; used to size the per-step
+ *   duration so the trace has roughly 50 steps regardless of the total.
+ * @returns An {@link ArmExecutor} suitable for trace demonstrations.
+ */
+function defaultBanditExecutor(budgetMs: number): ArmExecutor {
+  const stepMs = Math.max(Math.floor(budgetMs / 50), 1);
+  return async (arm: 'prosecution-rollout' | 'defense-rebuttal' | 'jury-round') => {
+    const reward = arm === 'jury-round' ? 0.7 : arm === 'defense-rebuttal' ? 0.5 : 0.3;
+    return { reward, durationMs: stepMs };
+  };
 }

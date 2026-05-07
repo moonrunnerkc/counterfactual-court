@@ -49,3 +49,27 @@ The format is deliberately small: title, status, decision, rationale, consequenc
 - LLM temperature changes are config-level decisions (update `runtime.lock.json` and document the variance), not code-level conveniences.
 - Residual quantized-inference variance per platform is documented in `docs/runtime-variance.md` (created in Phase 2G); replay tolerates that variance via an explicit flag and never silently smooths it.
 - Integration test flakiness is interpreted as a determinism violation, not a test bug, and triaged accordingly.
+
+---
+
+## ADR-003: UCB1 reward signal (Phase 2D)
+
+**Status:** Accepted. 2026-05-07.
+
+**Decision:** The Phase 2D budget orchestrator allocates each next rollout via standard UCB1 (Auer/Cesa-Bianchi/Fischer 2002) over three discrete arms: `prosecution-rollout`, `defense-rebuttal`, `jury-round`. The reward signal for one rollout is:
+
+```
+reward = clamp(0, 1, 0.5 * graphNodeDelta / (graphNodeDelta + 5)
+                       + 0.5 * max(0, juryConfidenceDelta))
+```
+
+where `graphNodeDelta` is the increase in the evidence graph's node count produced by the rollout, and `juryConfidenceDelta` is the change in the verdict node's confidence (post − pre). The two terms are weighted equally; the graph term is bounded via `x / (x + 5)` so a single rollout that adds many nodes cannot starve the others, and the confidence term is clamped to non-negative so a confidence drop does not produce a negative reward (UCB1 assumes non-negative bounded rewards).
+
+**Rationale:** The orchestrator has no oracle for "this rollout produced new information," so the reward proxies are observable artifacts of the rollout: how many graph nodes appeared and how the Jury's confidence shifted. Both signals are deterministic given the same seed, which preserves the determinism contract. The bounded-fraction transform on `graphNodeDelta` is preferred over a raw count because UCB1 calibration assumes rewards in `[0, 1]`; an unbounded reward would inflate one arm's mean and turn the bandit into a one-arm policy.
+
+**Consequences:**
+
+- The reward function lives next to the orchestrator (not deep inside the bandit) so it can be replaced without touching UCB1.
+- The bandit state is initialized empty per run; we do not carry exploration history across runs because the patches are different bandits.
+- Exploration coefficient `c` defaults to 2 (textbook UCB1). Adjusting it is an ADR change, not a code-level decision.
+- The allocation trace is recorded into the bundle so a replay can reconstruct exactly which arm was pulled at which step under which UCB scores.

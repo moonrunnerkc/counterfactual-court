@@ -12,6 +12,7 @@ import type { PrecedentNodePayload } from '../evidence/graph.js';
 import { addLedgerEntry, openLedger } from '../precedent/ledger.js';
 import { queryPrecedents } from '../precedent/query.js';
 import { type RippleSet, traceImpact } from '../monorepo/impact-trace.js';
+import { type AllocationTrace, type ArmExecutor, runBanditLoop } from '../budget/orchestrator.js';
 
 /** Inputs the orchestrator consumes; identical to the bundle's `inputs` block. */
 export interface OrchestratorInputs {
@@ -38,6 +39,13 @@ export interface OrchestratorDeps {
   readonly runtimeLock: RuntimeLock;
   /** Caller-supplied base seed string; embedded for audit and replay. */
   readonly baseSeed: string;
+  /**
+   * Phase 2D budget configuration. When supplied, the orchestrator runs a
+   * UCB1 budget loop after the linear pipeline and embeds the allocation
+   * trace into the bundle body. Absent on Phase 1 / linear runs so legacy
+   * bundles stay bit-identical.
+   */
+  readonly budget?: { readonly budgetMs: number; readonly executor: ArmExecutor };
 }
 
 /** Result of a successful orchestrator run; ready to sign. */
@@ -145,6 +153,15 @@ export async function runCourt(
   const reporterCall = inputs.attachments.length === 0 ? null : requireCall(calls, 2);
   const juryCall = requireCall(calls, calls.length - 1);
 
+  let allocationTrace: AllocationTrace | null = null;
+  if (deps.budget !== undefined) {
+    const { trace } = await runBanditLoop({
+      budgetMs: deps.budget.budgetMs,
+      executor: deps.budget.executor,
+    });
+    allocationTrace = trace;
+  }
+
   const id = contentHash({
     fixture: inputs.fixture,
     baseSeed: deps.baseSeed,
@@ -152,6 +169,7 @@ export async function runCourt(
     defenseHash: defenderCall.result.responseHash,
     reporterHash: reporterCall?.result.responseHash ?? null,
     juryHash: juryCall.result.responseHash,
+    allocationTraceHash: allocationTrace === null ? null : contentHash(allocationTrace),
   });
 
   const body: BundleBody = {
@@ -186,6 +204,7 @@ export async function runCourt(
         output: jury,
       },
     },
+    ...(allocationTrace === null ? {} : { allocationTrace }),
     replayInstructions: REPLAY_INSTRUCTIONS,
   };
 
