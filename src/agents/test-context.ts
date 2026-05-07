@@ -4,6 +4,12 @@ import { loadConfig } from '../runtime/config.js';
 import { createLogger } from '../runtime/log.js';
 import type { LlmClient } from '../runtime/llm-client.js';
 
+/** Optional overrides for {@link createTestContext}. */
+export interface TestContextOverrides {
+  /** Override individual feature flags. Useful for graph-path agent tests. */
+  readonly features?: { readonly evidenceGraph?: boolean };
+}
+
 /**
  * Build an in-memory {@link AgentContext} suitable for behavior tests. The
  * logger discards output (sink ignores its argument), so test assertions focus
@@ -14,12 +20,24 @@ import type { LlmClient } from '../runtime/llm-client.js';
  * convenience, but it is excluded from the build by the build tsconfig path
  * filter just like the test files themselves.
  *
- * @param llm  LlmClient implementation (typically the deterministic stub).
- * @param seed Seed for the RNG (defaults to a stable string).
+ * @param llm       LlmClient implementation (typically the deterministic stub).
+ * @param seed      Seed for the RNG (defaults to a stable string).
+ * @param overrides Optional feature-flag overrides for Phase 2 tests.
  * @returns An AgentContext wired to the supplied LLM and a no-op logger.
  */
-export function createTestContext(llm: LlmClient, seed: RngSeed = 'test-seed'): AgentContext {
-  const config = loadConfig({});
+export function createTestContext(
+  llm: LlmClient,
+  seed: RngSeed = 'test-seed',
+  overrides: TestContextOverrides = {},
+): AgentContext {
+  const baseConfig = loadConfig({});
+  const config =
+    overrides.features !== undefined
+      ? Object.freeze({
+          ...baseConfig,
+          features: Object.freeze({ ...baseConfig.features, ...overrides.features }),
+        })
+      : baseConfig;
   const clock = frozenClockAt('2026-05-07T14:00:00Z');
   const logger = createLogger({
     clock,

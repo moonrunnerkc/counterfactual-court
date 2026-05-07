@@ -2,17 +2,21 @@ import type { AgentContext } from '../runtime/agent-context.js';
 import { parseJsonResponse } from './parse-json-response.js';
 import {
   JuryOpinion,
+  RawJuryGraphSchema,
   type DefenseDossier,
   type ProsecutionDossier,
   type ReporterExhibits,
 } from '../evidence/schema.js';
+import { buildEvidenceGraph, parseRawJuryGraph } from '../evidence/builder.js';
+import { renderOpinionFromGraph } from '../evidence/render-opinion.js';
+import type { RawJuryGraph } from '../evidence/graph.js';
 
 /** Default Ollama tag for the Jury. 128k context, q8_0 quant. */
 export const JURY_MODEL = 'gemma4:31b-it-q8_0';
 
 const MAX_SEED = 2 ** 31 - 1;
 
-const SYSTEM_PROMPT = `You are the Jury in Counterfactual Court, an offline PR review system.
+const SYSTEM_PROMPT_LEGACY = `You are the Jury in Counterfactual Court, an offline PR review system.
 You are the only agent that sees the whole picture. Your job is to weigh the Prosecutor's exhibits against the Defender's rebuttals, account for any Court Reporter exhibits, and consult the project's style and policy documents to render a verdict.
 Return a single JSON object that conforms to this TypeScript type and nothing else:
 
@@ -31,6 +35,33 @@ Rules:
 - citedEvidenceIds must reference exhibit ids actually present in the inputs.
 - A unanimous opinion has dissents: [].
 - EVERY field listed in the type is required. A missing field invalidates the opinion. confidence is required even when low; pick a number between 0 and 1.
+- Output JSON only, no Markdown, no commentary.`;
+
+const SYSTEM_PROMPT_GRAPH = `You are the Jury in Counterfactual Court, an offline PR review system.
+Your job is to emit a structured evidence graph that captures every load-bearing claim, citation, and counter-argument behind your verdict. The prose opinion is generated from this graph by the runtime; do not write the opinion separately.
+Return a single JSON object that conforms to this TypeScript type and nothing else:
+
+interface RawJuryGraph {
+  exhibits: Array<{
+    label: string;            // short id you will reuse in edges, e.g. "p1", "d3", "j1"
+    source: "prosecution" | "defense" | "reporter" | "jury";
+    claim: string;
+    evidence: string;          // verbatim quote from the diff or repo
+    confidence: number;        // 0..1
+    kind: "logic-error" | "security-risk" | "test-weakening" | "style-violation" | "license-concern" | "documentation" | "multimodal-extraction" | "other";
+  }>;
+  citations: Array<{ label: string; reference: string; excerpt: string }>;
+  testCases: Array<{ label: string; description: string; expected: string; observed: string | null }>;
+  precedents: Array<{ label: string; bundleId: string; similarity: number; justification: string }>;
+  verdict: { label: string; verdict: "approve" | "reject" | "request-changes"; confidence: number; summary: string };
+  edges: Array<{ from: string; to: string; relation: "supports" | "refutes" | "depends-on" }>;
+  dissents: Array<{ verdict: "approve" | "reject" | "request-changes"; rationale: string }>;
+}
+
+Rules:
+- Every edge label (from, to) must match a label declared in exhibits, citations, testCases, precedents, or verdict.
+- Each exhibit you reference from the Prosecutor or Defender input must reuse that input's exhibit id as its label.
+- Use the verdict label as the destination of edges that support or refute the final verdict.
 - Output JSON only, no Markdown, no commentary.`;
 
 /**
@@ -102,8 +133,15 @@ export interface JuryInput {
  * Run the Jury agent. The only agent with the full picture: repo HEAD, both
  * dossiers, multimodal exhibits, style/policy docs.
  *
+ * Dispatches by `ctx.config.features.evidenceGraph`: when off (the Phase 1
+ * default), the Jury asks the LLM for a {@link JuryOpinion} directly. When on
+ * (Phase 2A), the Jury asks for a raw evidence graph, builds a
+ * content-addressed graph, and renders the prose opinion deterministically
+ * from the graph.
+ *
  * @param input Repo head, patch, both dossiers, reporter exhibits, style docs.
- * @returns A validated {@link JuryOpinion}.
+ * @returns A validated {@link JuryOpinion}; `evidenceGraph` is null on the
+ *   legacy path and populated on the graph path.
  * @throws Error if the model output is not valid JSON or fails the schema.
  */
 export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
@@ -111,9 +149,11 @@ export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
   const log = ctx.logger.child({ agent: 'jury' });
   const seed = ctx.rng.nextInt(0, MAX_SEED);
   const prompt = buildJuryPrompt(input);
+  const useGraph = ctx.config.features.evidenceGraph;
   log.info('agent.start', {
     model: JURY_MODEL,
     seed,
+    mode: useGraph ? 'graph' : 'legacy',
     prosecutionExhibits: input.prosecution.exhibits.length,
     defenseRebuttals: input.defense.rebuttals.length,
     reporterExhibits: input.reporterExhibits.exhibits.length,
@@ -121,20 +161,58 @@ export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
   });
   const result = await ctx.llm.call({
     model: JURY_MODEL,
-    system: SYSTEM_PROMPT,
+    system: useGraph ? SYSTEM_PROMPT_GRAPH : SYSTEM_PROMPT_LEGACY,
     prompt,
     temperature: 0,
     topP: 0.95,
     topK: 40,
     seed,
   });
-  const opinion = parseJsonResponse(result.text, JuryOpinion, 'jury');
+
+  if (!useGraph) {
+    const opinion = parseJsonResponse(result.text, JuryOpinion, 'jury');
+    log.info('agent.done', {
+      promptHash: result.promptHash,
+      responseHash: result.responseHash,
+      verdict: opinion.verdict,
+      dissents: opinion.dissents.length,
+      citations: opinion.citedEvidenceIds.length,
+    });
+    return opinion;
+  }
+
+  const raw = parseRawGraph(result.text);
+  const graph = buildEvidenceGraph(raw);
+  const opinion = renderOpinionFromGraph(graph);
   log.info('agent.done', {
     promptHash: result.promptHash,
     responseHash: result.responseHash,
     verdict: opinion.verdict,
     dissents: opinion.dissents.length,
+    nodes: graph.nodes.length,
+    edges: graph.edges.length,
     citations: opinion.citedEvidenceIds.length,
   });
   return opinion;
 }
+
+/**
+ * Parse the raw graph JSON the LLM produced. Surfaces both JSON and zod
+ * errors with the `jury` caller tag so logs match the agent that emitted
+ * them.
+ */
+function parseRawGraph(text: string): RawJuryGraph {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `jury: model output is not valid JSON (${reason}); the Jury must emit a single JSON object`,
+    );
+  }
+  return parseRawJuryGraph(parsed, 'jury');
+}
+
+/** Re-export so callers can validate raw graphs without reaching into builder.ts. */
+export { RawJuryGraphSchema };

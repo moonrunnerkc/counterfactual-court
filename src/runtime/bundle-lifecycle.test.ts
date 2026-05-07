@@ -208,4 +208,67 @@ describe('bundle lifecycle integration', () => {
     expect(juryMatch?.match).toBe(false);
     expect(report.fullMatch).toBe(false);
   });
+
+  it('round-trips a bundle that includes the evidence graph (Phase 2A)', async () => {
+    const RAW_GRAPH = {
+      exhibits: [
+        {
+          source: 'prosecution',
+          label: 'p1',
+          claim: 'add() now subtracts',
+          evidence: 'a - b',
+          confidence: 0.9,
+          kind: 'logic-error',
+        },
+      ],
+      citations: [],
+      testCases: [],
+      precedents: [],
+      verdict: {
+        label: 'v1',
+        verdict: 'reject',
+        confidence: 0.95,
+        summary: 'clear regression',
+      },
+      edges: [{ from: 'p1', to: 'v1', relation: 'supports' }],
+      dissents: [],
+    };
+    const graphHandle = (params: LlmCallParams): string => {
+      if (params.model.startsWith('gemma4:31b')) return JSON.stringify(RAW_GRAPH);
+      return handle(params);
+    };
+    const llm = createStubLlmClient(graphHandle);
+    const ctx = createTestContext(llm, 'graph-integration-seed', {
+      features: { evidenceGraph: true },
+    });
+    const { body } = await runCourt(INPUTS, {
+      ctx,
+      runtimeLock: RUNTIME_LOCK,
+      baseSeed: 'graph-integration-seed',
+    });
+    const bundleDir = mkdtempSync(join(tmpdir(), 'cc-bundles-'));
+    const written = writeSignedBundle(body, 'graph-integration-seed', bundleDir);
+
+    const reloaded = loadSignedBundle(written.path);
+    expect(verifyBundleSignature(reloaded).ok).toBe(true);
+    const graph = reloaded.body.agents.jury.output.evidenceGraph;
+    expect(graph).toBeDefined();
+    expect(graph!.nodes).toHaveLength(2);
+    expect(graph!.edges).toHaveLength(1);
+    expect(graph!.nodes.every((n) => /^[0-9a-f]{64}$/.test(n.id))).toBe(true);
+
+    // Bit-identical re-write check: rerun with same seed yields the same bytes.
+    const llm2 = createStubLlmClient(graphHandle);
+    const ctx2 = createTestContext(llm2, 'graph-integration-seed', {
+      features: { evidenceGraph: true },
+    });
+    const { body: body2 } = await runCourt(INPUTS, {
+      ctx: ctx2,
+      runtimeLock: RUNTIME_LOCK,
+      baseSeed: 'graph-integration-seed',
+    });
+    const replayDir = mkdtempSync(join(tmpdir(), 'cc-bundles-'));
+    const rewritten = writeSignedBundle(body2, 'graph-integration-seed', replayDir);
+    expect(sha256Hex(readFileSync(rewritten.path))).toBe(sha256Hex(readFileSync(written.path)));
+  });
 });

@@ -59,7 +59,10 @@ export const PACKAGE_VERSION: string = readPackageVersion();
 export const USAGE = `Usage: gemmacourt [--help] [--version] <command> [args]
 
 Commands:
-  run --fixture <name>          Run the four agents against fixtures/<name> and write a signed .verdict bundle.
+  run --fixture <name> [--evidence-graph] [--graph-only]
+                                Run the four agents against fixtures/<name> and write a signed .verdict bundle.
+                                --evidence-graph turns on the Phase 2A graph emission for this run.
+                                --graph-only implies --evidence-graph and prints the graph JSON to stdout instead of the bundle path.
   replay <bundle> [--tolerate-hash] [--tolerate-runtime]
                                 Re-run a bundle and report whether the response hashes match the recorded ones.
   verify <bundle>               Verify the Ed25519 signature on a bundle. No LLM calls.
@@ -134,8 +137,25 @@ export async function main(argv: readonly string[]): Promise<CliResult> {
         stderr: `gemmacourt run: --fixture <name> is required\n${USAGE}`,
       };
     }
+    const graphOnly = rest.includes('--graph-only');
+    const enableGraph = graphOnly || rest.includes('--evidence-graph');
     try {
-      const outcome = await executeRun({ fixture });
+      const outcome = await executeRun({ fixture, forceEvidenceGraph: enableGraph });
+      if (graphOnly) {
+        if (outcome.evidenceGraph === null) {
+          return {
+            code: 1,
+            stdout: '',
+            stderr:
+              'gemmacourt run --graph-only: the run produced no evidence graph; the Jury must run with the evidence-graph feature on\n',
+          };
+        }
+        return {
+          code: 0,
+          stdout: `${JSON.stringify(outcome.evidenceGraph, null, 2)}\n`,
+          stderr: `wrote bundle ${outcome.bundleId}\n`,
+        };
+      }
       return {
         code: 0,
         stdout: `${outcome.bundlePath}\n`,

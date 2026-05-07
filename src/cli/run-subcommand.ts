@@ -4,6 +4,8 @@ import { runCourt } from '../runtime/orchestrator.js';
 import { writeSignedBundle } from '../runtime/bundle-writer.js';
 import { loadRuntimeLock } from '../runtime/runtime-lock.js';
 import type { LlmClient } from '../runtime/llm-client.js';
+import type { Config } from '../runtime/config.js';
+import type { EvidenceGraph } from '../evidence/graph.js';
 import { buildAgentContext, buildOllamaClient, loadConfig } from './build-context.js';
 import { loadFixture } from './load-fixture.js';
 
@@ -18,12 +20,20 @@ export interface RunOptions {
   readonly baseSeed?: string;
   /** Optional clock override. Defaults to the config's run timestamp or a new wall ISO string. */
   readonly clockIso?: string;
+  /**
+   * Phase 2A flag. When true, force-enables the evidence-graph feature for
+   * this run regardless of the env config. Used by `--graph-only` so a
+   * caller can request a graph without setting an env var first.
+   */
+  readonly forceEvidenceGraph?: boolean;
 }
 
 /** Result returned by {@link executeRun}. */
 export interface RunOutcome {
   readonly bundlePath: string;
   readonly bundleId: string;
+  /** Evidence graph emitted by the Jury, if the run produced one. */
+  readonly evidenceGraph: EvidenceGraph | null;
 }
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -47,7 +57,14 @@ function defaultProjectRoot(): string {
  */
 export async function executeRun(opts: RunOptions): Promise<RunOutcome> {
   const projectRoot = opts.projectRoot ?? defaultProjectRoot();
-  const config = loadConfig();
+  const baseConfig = loadConfig();
+  const config: Config =
+    opts.forceEvidenceGraph === true
+      ? Object.freeze({
+          ...baseConfig,
+          features: Object.freeze({ ...baseConfig.features, evidenceGraph: true }),
+        })
+      : baseConfig;
   const runtimeLock = loadRuntimeLock(config.runtimeLockPath);
   const inputs = loadFixture(projectRoot, opts.fixture);
   const baseSeed = opts.baseSeed ?? config.seed ?? `run-${opts.fixture}`;
@@ -56,5 +73,6 @@ export async function executeRun(opts: RunOptions): Promise<RunOutcome> {
   const ctx = buildAgentContext({ config, baseSeed, clockIso, llm });
   const { body } = await runCourt(inputs, { ctx, runtimeLock, baseSeed });
   const written = writeSignedBundle(body, baseSeed, config.bundlesDir);
-  return { bundlePath: written.path, bundleId: body.id };
+  const evidenceGraph = body.agents.jury.output.evidenceGraph ?? null;
+  return { bundlePath: written.path, bundleId: body.id, evidenceGraph };
 }

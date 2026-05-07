@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 1A–1D complete; entering Phase 2
+**Phase:** 2A complete; 2B in progress
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Determinism runtime, four Gemma 4 agents (e4b / 26b-a4b / e4b-vision / 31b-128k), signed `.verdict` bundle writer with deterministic Ed25519, runtime-locked replayer with per-agent hash diffs, and `gemmacourt run/replay/verify` CLI. First real OSS verdict landed on `colinhacks/zod#5945` (verdict=approve, conf 0.9, 2 citations, 0 dissents); bundle replayed bit-identical against real Ollama with zero observed quantized variance on this hardware. 86 unit/integration tests green; full pipeline tests pass against the real 31B/26B/e4b stack.
+**One-line:** Phase 1 closed. Phase 2A landed: content-addressed Evidence Graph (nodes={exhibit, citation, test-case, precedent, verdict}, edges={supports, refutes, depends-on}), zod schemas at every mutation, pure builder, deterministic graph→opinion renderer, Jury refactored to dispatch by `features.evidenceGraph` (default off so the Phase 1 regression gate stays bit-identical), `--graph-only` CLI flag, bundle round-trip including the graph. 111 unit/integration tests green (was 86; +25 across builder, render-opinion, jury-graph, config, bundle-lifecycle).
 
 ## Active Blockers
 
@@ -134,11 +134,11 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2A. Evidence Graph (do this first; downstream features depend on it)
 
-- [ ] `src/evidence/graph.ts`: typed nodes (exhibit, citation, test-case, precedent, verdict), typed edges (supports, refutes, depends-on)
-- [ ] `src/evidence/schema.ts`: zod schemas for all node payloads
-- [ ] Jury emits the graph as the primary output; opinion is generated FROM the graph
-- [ ] `pnpm gemmacourt run` writes `evidence-graph.json` alongside the verdict
-- [ ] CLI flag `--graph-only` prints the graph without the prose opinion
+- [x] `src/evidence/graph.ts`: typed nodes (exhibit, citation, test-case, precedent, verdict), typed edges (supports, refutes, depends-on)
+- [x] `src/evidence/schema.ts`: zod schemas for all node payloads
+- [x] Jury emits the graph as the primary output; opinion is generated FROM the graph
+- [x] `pnpm gemmacourt run` writes `evidence-graph.json` alongside the verdict (nested at `agents.jury.output.evidenceGraph` inside the signed bundle envelope)
+- [x] CLI flag `--graph-only` prints the graph without the prose opinion
 
 ### 2B. Precedent Ledger
 

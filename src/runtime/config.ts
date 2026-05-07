@@ -32,6 +32,15 @@ export interface Config {
    * single env knob fully reproduces a run.
    */
   readonly seed: string | null;
+  /**
+   * Phase 2 feature flags. Each defaults off so the Phase 1 regression gate
+   * (bit-identical replay of a Phase 1 bundle) cannot be disturbed by a
+   * Phase 2 feature landing in the wrong run.
+   */
+  readonly features: {
+    /** Phase 2A. When on, the Jury emits an evidence graph and the prose is derived from it. */
+    readonly evidenceGraph: boolean;
+  };
 }
 
 /**
@@ -94,6 +103,19 @@ export function loadConfig(env: Readonly<NodeJS.ProcessEnv> = process.env): Conf
         : null,
     seed:
       env['GEMMACOURT_SEED'] && env['GEMMACOURT_SEED'].length > 0 ? env['GEMMACOURT_SEED'] : null,
+    features: Object.freeze({
+      evidenceGraph: parseBoolFlag(env['GEMMACOURT_FEATURE_EVIDENCE_GRAPH']),
+    }),
   };
   return Object.freeze(config);
+}
+
+/**
+ * Parse a boolean feature-flag env var. `true`, `1`, and `yes` (case
+ * insensitive) enable the flag; everything else disables it.
+ */
+function parseBoolFlag(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
 }

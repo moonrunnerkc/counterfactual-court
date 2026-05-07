@@ -11,7 +11,25 @@ describe('loadConfig', () => {
     expect(cfg.runtimeLockPath).toBe(resolve('./runtime.lock.json'));
     expect(cfg.runTimestamp).toBeNull();
     expect(cfg.seed).toBeNull();
+    expect(cfg.features.evidenceGraph).toBe(false);
     expect(Object.isFrozen(cfg)).toBe(true);
+    expect(Object.isFrozen(cfg.features)).toBe(true);
+  });
+
+  it('parses the evidence-graph feature flag from env', () => {
+    expect(loadConfig({ GEMMACOURT_FEATURE_EVIDENCE_GRAPH: 'true' }).features.evidenceGraph).toBe(
+      true,
+    );
+    expect(loadConfig({ GEMMACOURT_FEATURE_EVIDENCE_GRAPH: '1' }).features.evidenceGraph).toBe(
+      true,
+    );
+    expect(loadConfig({ GEMMACOURT_FEATURE_EVIDENCE_GRAPH: 'On' }).features.evidenceGraph).toBe(
+      true,
+    );
+    expect(loadConfig({ GEMMACOURT_FEATURE_EVIDENCE_GRAPH: 'no' }).features.evidenceGraph).toBe(
+      false,
+    );
+    expect(loadConfig({}).features.evidenceGraph).toBe(false);
   });
 
   it('strips a trailing slash from the Ollama URL', () => {
