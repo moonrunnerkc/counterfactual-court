@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A complete; 2B in progress
+**Phase:** 2A+2B complete; 2C in progress
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A landed: content-addressed Evidence Graph (nodes={exhibit, citation, test-case, precedent, verdict}, edges={supports, refutes, depends-on}), zod schemas at every mutation, pure builder, deterministic graph→opinion renderer, Jury refactored to dispatch by `features.evidenceGraph` (default off so the Phase 1 regression gate stays bit-identical), `--graph-only` CLI flag, bundle round-trip including the graph. 111 unit/integration tests green (was 86; +25 across builder, render-opinion, jury-graph, config, bundle-lifecycle).
+**One-line:** Phase 1 closed. Phase 2A: content-addressed Evidence Graph behind `features.evidenceGraph` (default off); graph→opinion inversion; `--graph-only`. Phase 2B: TS-AST-histogram similarity (cosine, symmetric, identity=1), `~/.gemmacourt/ledger/` content-addressed cache, top-N query above threshold (default 0.85), justification enforcement at orchestrator boundary, `--precedent` CLI flag (default off). 132 unit/integration tests green (was 111; +21 across ast-diff, ledger, query, justification).
 
 ## Active Blockers
 
@@ -142,12 +142,12 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2B. Precedent Ledger
 
-- [ ] `src/precedent/ast-diff.ts`: structural similarity scoring between patches
-- [ ] `src/precedent/ledger.ts`: local content-addressed cache of prior verdicts
-- [ ] Jury queries ledger before deliberation; cites precedents above threshold
-- [ ] Tunable threshold via config (`precedent.similarityThreshold`)
-- [ ] Jury opinion must justify every cited precedent (test enforces)
-- [ ] Optional opt-in public push (deferred to Phase 3 if tight)
+- [x] `src/precedent/ast-diff.ts`: structural similarity scoring between patches (cosine of TS SyntaxKind histograms; symmetric, identity=1, in [0, 1])
+- [x] `src/precedent/ledger.ts`: local content-addressed cache of prior verdicts at `~/.gemmacourt/ledger/` (configurable via `GEMMACOURT_LEDGER_DIR`)
+- [x] Jury queries ledger before deliberation; cites precedents above threshold (orchestrator passes `precedents: PrecedentNodePayload[]` to deliberate when `features.precedent` is on)
+- [x] Tunable threshold via config (`precedent.similarityThreshold`, default 0.85; topN default 3)
+- [x] Jury opinion must justify every cited precedent (test enforces — `assertEveryPrecedentJustified` runs at the orchestrator boundary; precedent without an incoming supports/depends-on edge from a non-precedent node throws)
+- [ ] Optional opt-in public push (deferred to Phase 3 per cuts list)
 
 ### 2C. Monorepo Impact Tracing
 

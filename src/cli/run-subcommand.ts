@@ -26,6 +26,12 @@ export interface RunOptions {
    * caller can request a graph without setting an env var first.
    */
   readonly forceEvidenceGraph?: boolean;
+  /**
+   * Phase 2B flag. When true, force-enables the precedent-ledger feature.
+   * Implies {@link forceEvidenceGraph} because precedents require the graph
+   * path to record their citations.
+   */
+  readonly forcePrecedent?: boolean;
 }
 
 /** Result returned by {@link executeRun}. */
@@ -58,11 +64,17 @@ function defaultProjectRoot(): string {
 export async function executeRun(opts: RunOptions): Promise<RunOutcome> {
   const projectRoot = opts.projectRoot ?? defaultProjectRoot();
   const baseConfig = loadConfig();
+  const enableGraph = opts.forceEvidenceGraph === true || opts.forcePrecedent === true;
+  const enablePrecedent = opts.forcePrecedent === true;
   const config: Config =
-    opts.forceEvidenceGraph === true
+    enableGraph || enablePrecedent
       ? Object.freeze({
           ...baseConfig,
-          features: Object.freeze({ ...baseConfig.features, evidenceGraph: true }),
+          features: Object.freeze({
+            ...baseConfig.features,
+            evidenceGraph: enableGraph || baseConfig.features.evidenceGraph,
+            precedent: enablePrecedent || baseConfig.features.precedent,
+          }),
         })
       : baseConfig;
   const runtimeLock = loadRuntimeLock(config.runtimeLockPath);

@@ -40,6 +40,17 @@ export interface Config {
   readonly features: {
     /** Phase 2A. When on, the Jury emits an evidence graph and the prose is derived from it. */
     readonly evidenceGraph: boolean;
+    /** Phase 2B. When on, the orchestrator queries the precedent ledger and feeds top matches to the Jury. */
+    readonly precedent: boolean;
+  };
+  /** Phase 2B precedent ledger settings. */
+  readonly precedent: {
+    /** Absolute path to the ledger directory. */
+    readonly ledgerDir: string;
+    /** Similarity threshold in [0, 1]; entries below this are not surfaced. */
+    readonly similarityThreshold: number;
+    /** Maximum number of precedents to surface to the Jury per run. */
+    readonly topN: number;
   };
 }
 
@@ -105,9 +116,46 @@ export function loadConfig(env: Readonly<NodeJS.ProcessEnv> = process.env): Conf
       env['GEMMACOURT_SEED'] && env['GEMMACOURT_SEED'].length > 0 ? env['GEMMACOURT_SEED'] : null,
     features: Object.freeze({
       evidenceGraph: parseBoolFlag(env['GEMMACOURT_FEATURE_EVIDENCE_GRAPH']),
+      precedent: parseBoolFlag(env['GEMMACOURT_FEATURE_PRECEDENT']),
+    }),
+    precedent: Object.freeze({
+      ledgerDir: resolveLedgerDirEnv(env['GEMMACOURT_LEDGER_DIR'], env),
+      similarityThreshold: parseThreshold(env['GEMMACOURT_PRECEDENT_THRESHOLD'], 0.85),
+      topN: parsePositiveInt(env['GEMMACOURT_PRECEDENT_TOP_N'], 3),
     }),
   };
   return Object.freeze(config);
+}
+
+/** Resolve the ledger directory env var into an absolute path with a default. */
+function resolveLedgerDirEnv(value: string | undefined, env: Readonly<NodeJS.ProcessEnv>): string {
+  if (value !== undefined && value.length > 0) return resolve(value);
+  const home = env['HOME'] ?? env['USERPROFILE'] ?? '.';
+  return resolve(home, '.gemmacourt', 'ledger');
+}
+
+/** Parse a similarity threshold env var, falling back to `fallback`. */
+function parseThreshold(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(
+      `GEMMACOURT_PRECEDENT_THRESHOLD must be a number in [0, 1]; got "${value}"; correct the env or unset it`,
+    );
+  }
+  return parsed;
+}
+
+/** Parse a positive-integer env var with a default. */
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `precedent topN must be a positive integer; got "${value}"; correct the env or unset it`,
+    );
+  }
+  return parsed;
 }
 
 /**

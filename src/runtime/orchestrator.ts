@@ -8,6 +8,9 @@ import { defend } from '../agents/defender.js';
 import { reportCourt, type PngAttachment } from '../agents/court-reporter.js';
 import { deliberate } from '../agents/jury.js';
 import type { BundleBody, BundleLlmCall } from './bundle-schema.js';
+import type { PrecedentNodePayload } from '../evidence/graph.js';
+import { addLedgerEntry, openLedger } from '../precedent/ledger.js';
+import { queryPrecedents } from '../precedent/query.js';
 
 /** Inputs the orchestrator consumes; identical to the bundle's `inputs` block. */
 export interface OrchestratorInputs {
@@ -106,6 +109,7 @@ export async function runCourt(
   });
   const defense = await defend({ patch: inputs.patch, dossier: prosecution, ctx });
   const reporterExhibits = await reportCourt({ attachments: inputs.attachments, ctx });
+  const precedents = ctx.config.features.precedent ? loadPrecedentsFor(ctx, inputs.patch) : [];
   const jury = await deliberate({
     repoHead: inputs.repoHead,
     patch: inputs.patch,
@@ -113,6 +117,7 @@ export async function runCourt(
     defense,
     reporterExhibits,
     styleDocs: inputs.styleDocs,
+    precedents,
     ctx,
   });
 
@@ -173,7 +178,31 @@ export async function runCourt(
     replayInstructions: REPLAY_INSTRUCTIONS,
   };
 
+  if (ctx.config.features.precedent) {
+    const ledger = openLedger(ctx.config.precedent.ledgerDir);
+    addLedgerEntry(ledger, inputs.patch, body.id, jury.verdict, ctx.clock.nowIso());
+  }
+
   return { body };
+}
+
+/**
+ * Open the ledger and return the top-N precedents above the configured
+ * similarity threshold. Returns an empty list when the ledger is empty so
+ * the prompt builder can omit the precedent block entirely (keeps the
+ * prompt byte-stable for runs that do not match any prior verdict).
+ */
+function loadPrecedentsFor(ctx: AgentContext, patch: string): readonly PrecedentNodePayload[] {
+  const ledger = openLedger(ctx.config.precedent.ledgerDir);
+  const matches = queryPrecedents(ledger, patch, {
+    threshold: ctx.config.precedent.similarityThreshold,
+    topN: ctx.config.precedent.topN,
+  });
+  return matches.map((m) => ({
+    bundleId: m.entry.bundleId,
+    similarity: m.similarity,
+    justification: `Prior verdict ${m.entry.verdict} on a structurally similar patch (sim=${m.similarity.toFixed(3)}).`,
+  }));
 }
 
 /** Provide an explicitly typed LlmClient surface for callers that build the ctx by hand. */

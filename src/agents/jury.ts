@@ -9,7 +9,8 @@ import {
 } from '../evidence/schema.js';
 import { buildEvidenceGraph, parseRawJuryGraph } from '../evidence/builder.js';
 import { renderOpinionFromGraph } from '../evidence/render-opinion.js';
-import type { RawJuryGraph } from '../evidence/graph.js';
+import type { PrecedentNodePayload, RawJuryGraph } from '../evidence/graph.js';
+import { assertEveryPrecedentJustified } from '../precedent/justification.js';
 
 /** Default Ollama tag for the Jury. 128k context, q8_0 quant. */
 export const JURY_MODEL = 'gemma4:31b-it-q8_0';
@@ -69,6 +70,10 @@ Rules:
  * the repo HEAD snapshot is included verbatim, not summarized. Exposed for
  * tests so they can assert prompt stability across refactors.
  *
+ * Precedent block is appended only when the orchestrator surfaced any. Empty
+ * arrays are not embedded so the prompt remains byte-stable across runs that
+ * happened to find no matches.
+ *
  * @param input Jury input bundle.
  * @returns The prompt string sent verbatim to the LLM.
  */
@@ -79,8 +84,9 @@ export function buildJuryPrompt(input: {
   readonly defense: DefenseDossier;
   readonly reporterExhibits: ReporterExhibits;
   readonly styleDocs: string;
+  readonly precedents?: readonly PrecedentNodePayload[];
 }): string {
-  return [
+  const segments: string[] = [
     '## Repository HEAD snapshot',
     '',
     input.repoHead,
@@ -104,11 +110,19 @@ export function buildJuryPrompt(input: {
     '## Style and policy docs',
     '',
     input.styleDocs,
-    '',
-    '## Task',
-    '',
-    'Render the JuryOpinion JSON now.',
-  ].join('\n');
+  ];
+  if (input.precedents !== undefined && input.precedents.length > 0) {
+    segments.push(
+      '',
+      '## Precedents (top matches from the ledger)',
+      '',
+      'Each precedent is keyed by `bundleId`. If you cite a precedent in your graph (kind=precedent), you MUST also include at least one supports/depends-on edge from a citation, exhibit, or test-case node into that precedent. The runtime rejects unjustified precedents.',
+      '',
+      JSON.stringify(input.precedents, null, 2),
+    );
+  }
+  segments.push('', '## Task', '', 'Render the JuryOpinion JSON now.');
+  return segments.join('\n');
 }
 
 /** Inputs accepted by {@link deliberate}. */
@@ -123,8 +137,13 @@ export interface JuryInput {
   readonly defense: DefenseDossier;
   /** Court Reporter output. */
   readonly reporterExhibits: ReporterExhibits;
-  /** Concatenated AGENTS.md, CONTRIBUTING.md, STYLE_GUIDE.md, and any precedents. */
+  /** Concatenated AGENTS.md, CONTRIBUTING.md, STYLE_GUIDE.md. */
   readonly styleDocs: string;
+  /**
+   * Phase 2B precedents surfaced by the ledger (top-N above threshold).
+   * Empty when the precedent feature is off or the ledger had no matches.
+   */
+  readonly precedents?: readonly PrecedentNodePayload[];
   /** Caller-supplied context bundling rng, clock, llm, logger, config. */
   readonly ctx: AgentContext;
 }
@@ -183,6 +202,7 @@ export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
 
   const raw = parseRawGraph(result.text);
   const graph = buildEvidenceGraph(raw);
+  assertEveryPrecedentJustified(graph);
   const opinion = renderOpinionFromGraph(graph);
   log.info('agent.done', {
     promptHash: result.promptHash,

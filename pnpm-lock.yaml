@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -27,9 +30,6 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
       typescript-eslint:
         specifier: ^8.18.2
         version: 8.59.2(eslint@9.39.4)(typescript@5.9.3)
