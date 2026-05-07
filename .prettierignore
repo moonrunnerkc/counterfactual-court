@@ -1,0 +1,12 @@
+dist/
+node_modules/
+coverage/
+pnpm-lock.yaml
+runtime.lock.json
+.pnpm-store/
+bundles/
+fixtures/
+
+# User-authored, intentionally hand-formatted
+BUILD_PLAN.md
+CLAUDE.md

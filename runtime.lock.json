@@ -1,0 +1,20 @@
+{
+  "ollama": {
+    "version": "0.23.1"
+  },
+  "node": {
+    "version": "24.15.0"
+  },
+  "models": {
+    "gemma4:26b-a4b-it-q8_0": {
+      "digest": "sha256:6bfaf9a8cb378e03991da10daa94ea8e85905276d6baaeed67f0b3ae9996fede"
+    },
+    "gemma4:31b-it-q8_0": {
+      "digest": "sha256:53dd8459790f8795177444daa9e33f417e03c0d1cdedb80b6c73898603d20aef"
+    },
+    "gemma4:e4b-it-q8_0": {
+      "digest": "sha256:9dcc35808b42e8975f1e9dd9d7866925a8d0704b6bb3613525323f355dde3923"
+    }
+  },
+  "generatedAt": "2026-05-07T20:16:53.884Z"
+}

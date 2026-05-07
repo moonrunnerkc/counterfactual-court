@@ -1,0 +1,13 @@
+{
+  "name": "zod-5945-cidrv6",
+  "description": "Real OSS PR fixture: colinhacks/zod#5945 'fix(v4): cidrv6 JSON schema pattern matches runtime'. Replaces the cidrv6 regex with one that mirrors the runtime CIDR v6 grammar so JSON schema and runtime agree on the same address forms (e.g. 2001:db8:1::/48). Production change is a single-file regex replacement; the PR also adds tests.",
+  "language": "typescript",
+  "prUrl": "https://github.com/colinhacks/zod/pull/5945",
+  "baseSha": "1fb56a5c18c27102dbc92260a4007c7732a0ccca",
+  "headSha": "45710f029e668b9daa8dd192f1a198c7428f0e5b",
+  "mergeCommitSha": "f29f2a6db443284eff44db181dbe146df98f92c2",
+  "additions": 9,
+  "deletions": 1,
+  "filesChanged": 2,
+  "productionFile": "packages/zod/src/v4/core/regexes.ts"
+}

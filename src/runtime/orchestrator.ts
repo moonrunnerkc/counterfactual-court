@@ -1,0 +1,180 @@
+import type { AgentContext } from './agent-context.js';
+import { contentHash } from './canonical.js';
+import type { LlmClient } from './llm-client.js';
+import { createRecordingLlmClient, type RecordedLlmCall } from './recording-llm-client.js';
+import type { RuntimeLock } from './runtime-lock.js';
+import { prosecute } from '../agents/prosecutor.js';
+import { defend } from '../agents/defender.js';
+import { reportCourt, type PngAttachment } from '../agents/court-reporter.js';
+import { deliberate } from '../agents/jury.js';
+import type { BundleBody, BundleLlmCall } from './bundle-schema.js';
+
+/** Inputs the orchestrator consumes; identical to the bundle's `inputs` block. */
+export interface OrchestratorInputs {
+  readonly fixture: string;
+  readonly patch: string;
+  readonly repoSnippet: string;
+  readonly repoHead: string;
+  readonly styleDocs: string;
+  readonly attachments: readonly PngAttachment[];
+}
+
+/** Dependencies the orchestrator needs to run an end-to-end pipeline. */
+export interface OrchestratorDeps {
+  /** AgentContext built by the caller. The orchestrator wraps `ctx.llm` for recording. */
+  readonly ctx: AgentContext;
+  /** Loaded runtime lock; copied verbatim into the bundle body. */
+  readonly runtimeLock: RuntimeLock;
+  /** Caller-supplied base seed string; embedded for audit and replay. */
+  readonly baseSeed: string;
+}
+
+/** Result of a successful orchestrator run; ready to sign. */
+export interface OrchestratorResult {
+  readonly body: BundleBody;
+}
+
+/**
+ * Pull the call at `idx` from `calls` and assert it exists. Used to convert
+ * the recording wrapper's loose `RecordedLlmCall[]` into a definitively
+ * typed reference without resorting to non-null assertions.
+ */
+function requireCall(calls: readonly RecordedLlmCall[], idx: number): RecordedLlmCall {
+  const entry = calls[idx];
+  if (entry === undefined) {
+    throw new Error(
+      `orchestrator: expected a recorded LLM call at index ${idx}; recorded ${calls.length}`,
+    );
+  }
+  return entry;
+}
+
+/**
+ * Convert one recorded LLM call into the bundle's typed audit record. Looks up
+ * the model digest from the runtime lock; throws when the model was not pinned
+ * because that violates the determinism contract (every call must use a model
+ * present in runtime.lock.json).
+ */
+function toBundleCall(call: RecordedLlmCall, runtimeLock: RuntimeLock): BundleLlmCall {
+  const pinned = runtimeLock.models[call.params.model];
+  if (pinned === undefined) {
+    throw new Error(
+      `orchestrator: model ${call.params.model} is not pinned in runtime.lock.json; add a digest entry before running`,
+    );
+  }
+  return {
+    model: call.params.model,
+    modelDigest: pinned.digest,
+    promptHash: call.result.promptHash,
+    responseHash: call.result.responseHash,
+    seed: call.params.seed,
+    prompt: call.params.prompt,
+    system: call.params.system ?? '',
+    response: call.result.text,
+    temperature: call.params.temperature,
+    topP: call.params.topP,
+    topK: call.params.topK,
+  };
+}
+
+const REPLAY_INSTRUCTIONS = [
+  'To replay this bundle: `pnpm gemmacourt replay <path-to-bundle>`.',
+  'Replay loads runtime.lock.json from the project root, refuses to run if Ollama version or model digests differ from the bundle, then re-invokes each agent with the recorded seeds and prompts and compares output hashes.',
+  'Verify signature only (no LLM calls): `pnpm gemmacourt verify <path-to-bundle>`.',
+].join(' ');
+
+/**
+ * Run the full Counterfactual Court pipeline against `inputs`, capture every
+ * agent call into a typed bundle body, and return it. Caller signs and writes.
+ *
+ * @param inputs PR fixture inputs (patch, repo state, attachments, style docs).
+ * @param deps   Agent context, runtime lock, and base seed.
+ * @returns Bundle body ready to be signed and written.
+ * @throws Error if a model used by an agent is not pinned in `runtime.lock.json`.
+ */
+export async function runCourt(
+  inputs: OrchestratorInputs,
+  deps: OrchestratorDeps,
+): Promise<OrchestratorResult> {
+  const recording = createRecordingLlmClient(deps.ctx.llm);
+  const ctx: AgentContext = { ...deps.ctx, llm: recording };
+
+  const prosecution = await prosecute({
+    patch: inputs.patch,
+    repoSnippet: inputs.repoSnippet,
+    ctx,
+  });
+  const defense = await defend({ patch: inputs.patch, dossier: prosecution, ctx });
+  const reporterExhibits = await reportCourt({ attachments: inputs.attachments, ctx });
+  const jury = await deliberate({
+    repoHead: inputs.repoHead,
+    patch: inputs.patch,
+    prosecution,
+    defense,
+    reporterExhibits,
+    styleDocs: inputs.styleDocs,
+    ctx,
+  });
+
+  const calls = recording.calls;
+  const expected = inputs.attachments.length === 0 ? 3 : 4;
+  if (calls.length !== expected) {
+    throw new Error(
+      `orchestrator: expected ${expected} LLM calls, recorded ${calls.length}; agent layer changed without updating the orchestrator`,
+    );
+  }
+
+  const prosecutorCall = requireCall(calls, 0);
+  const defenderCall = requireCall(calls, 1);
+  const reporterCall = inputs.attachments.length === 0 ? null : requireCall(calls, 2);
+  const juryCall = requireCall(calls, calls.length - 1);
+
+  const id = contentHash({
+    fixture: inputs.fixture,
+    baseSeed: deps.baseSeed,
+    prosecutionHash: prosecutorCall.result.responseHash,
+    defenseHash: defenderCall.result.responseHash,
+    reporterHash: reporterCall?.result.responseHash ?? null,
+    juryHash: juryCall.result.responseHash,
+  });
+
+  const body: BundleBody = {
+    schemaVersion: '1',
+    id,
+    createdAt: ctx.clock.nowIso(),
+    fixture: inputs.fixture,
+    baseSeed: deps.baseSeed,
+    runtime: deps.runtimeLock,
+    inputs: {
+      patch: inputs.patch,
+      repoSnippet: inputs.repoSnippet,
+      repoHead: inputs.repoHead,
+      styleDocs: inputs.styleDocs,
+      attachments: inputs.attachments.map((a) => ({ name: a.name, base64: a.base64 })),
+    },
+    agents: {
+      prosecutor: {
+        call: toBundleCall(prosecutorCall, deps.runtimeLock),
+        output: prosecution,
+      },
+      defender: {
+        call: toBundleCall(defenderCall, deps.runtimeLock),
+        output: defense,
+      },
+      courtReporter: {
+        call: reporterCall === null ? null : toBundleCall(reporterCall, deps.runtimeLock),
+        output: reporterExhibits,
+      },
+      jury: {
+        call: toBundleCall(juryCall, deps.runtimeLock),
+        output: jury,
+      },
+    },
+    replayInstructions: REPLAY_INSTRUCTIONS,
+  };
+
+  return { body };
+}
+
+/** Provide an explicitly typed LlmClient surface for callers that build the ctx by hand. */
+export type { LlmClient };

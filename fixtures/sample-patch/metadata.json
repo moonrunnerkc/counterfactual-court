@@ -1,0 +1,6 @@
+{
+  "name": "sample-patch",
+  "description": "A one-line TS regression: add() is silently inverted to subtract. Used for Phase 1B/1C smoke tests against the stub LLM and for the first end-to-end run.",
+  "language": "typescript",
+  "linesChanged": 1
+}
