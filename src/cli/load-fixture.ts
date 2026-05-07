@@ -45,6 +45,15 @@ export function loadFixture(projectRoot: string, name: string): OrchestratorInpu
     }
   }
 
+  const monorepoSrcDir = join(fixtureDir, 'src');
+  const hasMonorepo = existsSync(monorepoSrcDir) && statSync(monorepoSrcDir).isDirectory();
+  const monorepoFields = hasMonorepo
+    ? {
+        monorepoRoot: fixtureDir,
+        monorepoFiles: collectTsFiles(monorepoSrcDir, fixtureDir),
+      }
+    : {};
+
   return {
     fixture: name,
     patch,
@@ -52,7 +61,29 @@ export function loadFixture(projectRoot: string, name: string): OrchestratorInpu
     repoHead,
     styleDocs,
     attachments,
+    ...monorepoFields,
   };
+}
+
+function collectTsFiles(dir: string, root: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      out.push(...collectTsFiles(full, root));
+      continue;
+    }
+    if (!stat.isFile()) continue;
+    if (!entry.endsWith('.ts') && !entry.endsWith('.tsx')) continue;
+    out.push(
+      full
+        .slice(root.length + 1)
+        .split('\\')
+        .join('/'),
+    );
+  }
+  return out;
 }
 
 function readRequired(dir: string, fileName: string): string {

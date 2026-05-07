@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A+2B complete; 2C in progress
+**Phase:** 2A+2B+2C complete; 2D in progress
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A: content-addressed Evidence Graph behind `features.evidenceGraph` (default off); graph→opinion inversion; `--graph-only`. Phase 2B: TS-AST-histogram similarity (cosine, symmetric, identity=1), `~/.gemmacourt/ledger/` content-addressed cache, top-N query above threshold (default 0.85), justification enforcement at orchestrator boundary, `--precedent` CLI flag (default off). 132 unit/integration tests green (was 111; +21 across ast-diff, ledger, query, justification).
+**One-line:** Phase 1 closed. Phase 2A: content-addressed Evidence Graph behind `features.evidenceGraph` (default off); graph→opinion inversion; `--graph-only`. Phase 2B: TS-AST-histogram similarity, `~/.gemmacourt/ledger/` content-addressed cache, top-N query above threshold (default 0.85), justification enforcement, `--precedent` flag. Phase 2C: TS-compiler import-graph extraction with re-export edges, BFS ripple-set with depth, `monorepo:<path>` citation enforcement helper, multi-file fixture (5 files), `--impact` flag. 148 unit/integration tests green (+16 across import-graph, impact-trace, jury-impact).
 
 ## Active Blockers
 
@@ -151,10 +151,10 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2C. Monorepo Impact Tracing
 
-- [ ] `src/monorepo/impact-trace.ts`: dependency graph extraction from imports
-- [ ] Jury context includes ripple set: files that import the patched modules
-- [ ] Jury opinion cites ripple effects explicitly (`"this change touches X imported by Y files"`)
-- [ ] Behavior test on a multi-file fixture
+- [x] `src/monorepo/impact-trace.ts`: dependency graph extraction from imports (TS compiler API; counts both `import ... from` and `export ... from` re-exports; resolves relative specifiers and `index.ts` barrels)
+- [x] Jury context includes ripple set: files that import the patched modules (orchestrator surfaces `RippleSet` via JuryInput when `features.monorepoImpact` is on; prompt embeds the JSON)
+- [x] Jury opinion cites ripple effects explicitly (`monorepo:<path>` citation node per ripple file; `assertEveryRippleFileCited` enforces this in tests via `findUncitedRippleFiles`)
+- [x] Behavior test on a multi-file fixture (`src/agents/jury-impact.test.ts` + `fixtures/multi-file/` with 5 files mixing direct imports and re-exports)
 
 ### 2D. UCB Bandit Budget Allocator
 

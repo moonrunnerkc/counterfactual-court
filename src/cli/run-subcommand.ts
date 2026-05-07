@@ -32,6 +32,12 @@ export interface RunOptions {
    * path to record their citations.
    */
   readonly forcePrecedent?: boolean;
+  /**
+   * Phase 2C flag. When true, force-enables monorepo impact tracing for
+   * this run. Implies {@link forceEvidenceGraph} because the ripple set is
+   * surfaced as graph citation nodes.
+   */
+  readonly forceMonorepoImpact?: boolean;
 }
 
 /** Result returned by {@link executeRun}. */
@@ -64,16 +70,21 @@ function defaultProjectRoot(): string {
 export async function executeRun(opts: RunOptions): Promise<RunOutcome> {
   const projectRoot = opts.projectRoot ?? defaultProjectRoot();
   const baseConfig = loadConfig();
-  const enableGraph = opts.forceEvidenceGraph === true || opts.forcePrecedent === true;
+  const enableGraph =
+    opts.forceEvidenceGraph === true ||
+    opts.forcePrecedent === true ||
+    opts.forceMonorepoImpact === true;
   const enablePrecedent = opts.forcePrecedent === true;
+  const enableMonorepoImpact = opts.forceMonorepoImpact === true;
   const config: Config =
-    enableGraph || enablePrecedent
+    enableGraph || enablePrecedent || enableMonorepoImpact
       ? Object.freeze({
           ...baseConfig,
           features: Object.freeze({
             ...baseConfig.features,
             evidenceGraph: enableGraph || baseConfig.features.evidenceGraph,
             precedent: enablePrecedent || baseConfig.features.precedent,
+            monorepoImpact: enableMonorepoImpact || baseConfig.features.monorepoImpact,
           }),
         })
       : baseConfig;

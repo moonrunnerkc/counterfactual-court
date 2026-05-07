@@ -42,6 +42,8 @@ export interface Config {
     readonly evidenceGraph: boolean;
     /** Phase 2B. When on, the orchestrator queries the precedent ledger and feeds top matches to the Jury. */
     readonly precedent: boolean;
+    /** Phase 2C. When on, the orchestrator computes a ripple set and surfaces it to the Jury as a structured exhibit. */
+    readonly monorepoImpact: boolean;
   };
   /** Phase 2B precedent ledger settings. */
   readonly precedent: {
@@ -117,6 +119,7 @@ export function loadConfig(env: Readonly<NodeJS.ProcessEnv> = process.env): Conf
     features: Object.freeze({
       evidenceGraph: parseBoolFlag(env['GEMMACOURT_FEATURE_EVIDENCE_GRAPH']),
       precedent: parseBoolFlag(env['GEMMACOURT_FEATURE_PRECEDENT']),
+      monorepoImpact: parseBoolFlag(env['GEMMACOURT_FEATURE_MONOREPO_IMPACT']),
     }),
     precedent: Object.freeze({
       ledgerDir: resolveLedgerDirEnv(env['GEMMACOURT_LEDGER_DIR'], env),

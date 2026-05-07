@@ -11,6 +11,7 @@ import type { BundleBody, BundleLlmCall } from './bundle-schema.js';
 import type { PrecedentNodePayload } from '../evidence/graph.js';
 import { addLedgerEntry, openLedger } from '../precedent/ledger.js';
 import { queryPrecedents } from '../precedent/query.js';
+import { type RippleSet, traceImpact } from '../monorepo/impact-trace.js';
 
 /** Inputs the orchestrator consumes; identical to the bundle's `inputs` block. */
 export interface OrchestratorInputs {
@@ -20,6 +21,13 @@ export interface OrchestratorInputs {
   readonly repoHead: string;
   readonly styleDocs: string;
   readonly attachments: readonly PngAttachment[];
+  /**
+   * Phase 2C inputs. When supplied (and `features.monorepoImpact` is on),
+   * the orchestrator builds the ripple set against `monorepoFiles` rooted at
+   * `monorepoRoot` and surfaces it to the Jury.
+   */
+  readonly monorepoRoot?: string;
+  readonly monorepoFiles?: readonly string[];
 }
 
 /** Dependencies the orchestrator needs to run an end-to-end pipeline. */
@@ -110,6 +118,8 @@ export async function runCourt(
   const defense = await defend({ patch: inputs.patch, dossier: prosecution, ctx });
   const reporterExhibits = await reportCourt({ attachments: inputs.attachments, ctx });
   const precedents = ctx.config.features.precedent ? loadPrecedentsFor(ctx, inputs.patch) : [];
+  const rippleSet = computeRippleIfRequested(ctx, inputs);
+  const juryRippleField = rippleSet === null ? {} : { rippleSet };
   const jury = await deliberate({
     repoHead: inputs.repoHead,
     patch: inputs.patch,
@@ -118,6 +128,7 @@ export async function runCourt(
     reporterExhibits,
     styleDocs: inputs.styleDocs,
     precedents,
+    ...juryRippleField,
     ctx,
   });
 
@@ -184,6 +195,20 @@ export async function runCourt(
   }
 
   return { body };
+}
+
+/**
+ * Compute the Phase 2C ripple set when the feature is on and the inputs
+ * supply a monorepo root and file list. Returns undefined otherwise so the
+ * Jury prompt omits the impact block entirely (keeps the prompt byte-stable
+ * for non-monorepo fixtures).
+ */
+function computeRippleIfRequested(ctx: AgentContext, inputs: OrchestratorInputs): RippleSet | null {
+  if (!ctx.config.features.monorepoImpact) return null;
+  if (inputs.monorepoRoot === undefined || inputs.monorepoFiles === undefined) return null;
+  if (inputs.monorepoFiles.length === 0) return null;
+  const { rippleSet } = traceImpact(inputs.monorepoRoot, inputs.monorepoFiles, inputs.patch);
+  return rippleSet;
 }
 
 /**

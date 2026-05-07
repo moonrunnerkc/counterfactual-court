@@ -59,11 +59,12 @@ export const PACKAGE_VERSION: string = readPackageVersion();
 export const USAGE = `Usage: gemmacourt [--help] [--version] <command> [args]
 
 Commands:
-  run --fixture <name> [--evidence-graph] [--graph-only] [--precedent]
+  run --fixture <name> [--evidence-graph] [--graph-only] [--precedent] [--impact]
                                 Run the four agents against fixtures/<name> and write a signed .verdict bundle.
                                 --evidence-graph turns on the Phase 2A graph emission for this run.
                                 --graph-only implies --evidence-graph and prints the graph JSON to stdout instead of the bundle path.
                                 --precedent (Phase 2B) queries the local ledger for prior verdicts and surfaces top matches to the Jury; implies --evidence-graph.
+                                --impact (Phase 2C) builds the import graph for the fixture's src/ tree, surfaces the ripple set to the Jury; implies --evidence-graph.
   replay <bundle> [--tolerate-hash] [--tolerate-runtime]
                                 Re-run a bundle and report whether the response hashes match the recorded ones.
   verify <bundle>               Verify the Ed25519 signature on a bundle. No LLM calls.
@@ -140,12 +141,14 @@ export async function main(argv: readonly string[]): Promise<CliResult> {
     }
     const graphOnly = rest.includes('--graph-only');
     const precedent = rest.includes('--precedent');
-    const enableGraph = graphOnly || rest.includes('--evidence-graph') || precedent;
+    const impact = rest.includes('--impact');
+    const enableGraph = graphOnly || rest.includes('--evidence-graph') || precedent || impact;
     try {
       const outcome = await executeRun({
         fixture,
         forceEvidenceGraph: enableGraph,
         forcePrecedent: precedent,
+        forceMonorepoImpact: impact,
       });
       if (graphOnly) {
         if (outcome.evidenceGraph === null) {

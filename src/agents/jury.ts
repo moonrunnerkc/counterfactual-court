@@ -11,6 +11,7 @@ import { buildEvidenceGraph, parseRawJuryGraph } from '../evidence/builder.js';
 import { renderOpinionFromGraph } from '../evidence/render-opinion.js';
 import type { PrecedentNodePayload, RawJuryGraph } from '../evidence/graph.js';
 import { assertEveryPrecedentJustified } from '../precedent/justification.js';
+import type { RippleSet } from '../monorepo/impact-trace.js';
 
 /** Default Ollama tag for the Jury. 128k context, q8_0 quant. */
 export const JURY_MODEL = 'gemma4:31b-it-q8_0';
@@ -85,6 +86,7 @@ export function buildJuryPrompt(input: {
   readonly reporterExhibits: ReporterExhibits;
   readonly styleDocs: string;
   readonly precedents?: readonly PrecedentNodePayload[];
+  readonly rippleSet?: RippleSet;
 }): string {
   const segments: string[] = [
     '## Repository HEAD snapshot',
@@ -121,6 +123,16 @@ export function buildJuryPrompt(input: {
       JSON.stringify(input.precedents, null, 2),
     );
   }
+  if (input.rippleSet !== undefined && input.rippleSet.entries.length > 0) {
+    segments.push(
+      '',
+      '## Monorepo impact (ripple set)',
+      '',
+      `The patch touches ${input.rippleSet.changedFiles.length} file(s). The following file(s) depend on the changed file(s) and may be affected. Cite affected files explicitly in your graph (citation nodes with reference="monorepo:<path>") when the change has non-trivial blast radius.`,
+      '',
+      JSON.stringify(input.rippleSet, null, 2),
+    );
+  }
   segments.push('', '## Task', '', 'Render the JuryOpinion JSON now.');
   return segments.join('\n');
 }
@@ -144,6 +156,12 @@ export interface JuryInput {
    * Empty when the precedent feature is off or the ledger had no matches.
    */
   readonly precedents?: readonly PrecedentNodePayload[];
+  /**
+   * Phase 2C ripple set computed by the orchestrator. Absent when the
+   * monorepo-impact feature is off or the patch lies outside the import
+   * graph.
+   */
+  readonly rippleSet?: RippleSet;
   /** Caller-supplied context bundling rng, clock, llm, logger, config. */
   readonly ctx: AgentContext;
 }

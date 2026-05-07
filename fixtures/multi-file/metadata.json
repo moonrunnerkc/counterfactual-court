@@ -1,0 +1,6 @@
+{
+  "name": "multi-file",
+  "description": "Phase 2C fixture monorepo. Five files with mixed re-exports; the patch flips add() and sub() in math.ts so the ripple set should surface index.ts (re-export), calculator.ts (direct importer), and cli.ts (transitive consumer). unrelated.ts is an island and should not appear.",
+  "language": "typescript",
+  "linesChanged": 4
+}
