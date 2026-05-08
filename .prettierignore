@@ -10,3 +10,6 @@ fixtures/
 # User-authored, intentionally hand-formatted
 BUILD_PLAN.md
 CLAUDE.md
+
+# Bench output, regenerated after each MaliciousPatch-Bench run
+bench/RESULTS.md
