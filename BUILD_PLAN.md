@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A-2F complete; 2G (replay hardening) in progress; final acceptance pending
+**Phase:** 2A-2G complete; final acceptance pending (real-bandit multi-file-e2e + re-baseline)
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A-2F landed: 2A-2E behind `features.*` flags (default off; Phase 1 regression gate intact); 2F MaliciousPatch-Bench corpus = 200 patches (100 real with verified permissive licenses + 100 poisoned across 5 CodeRabbit categories), bench/run-court.ts + run-raw-31b.ts harnesses, METHODOLOGY.md, manifest validation, 10-patch smoke run with honest RESULTS.md (raw 31B F1 0.947, Court F1 0.571 driven by Ollama-overload error rate on commodity hardware; full 200-patch run queued). 190 unit/integration tests green (+7 from bench manifest+smoke).
+**One-line:** Phase 1 closed. Phase 2A-2G landed: 2A-2E behind feature flags; 2F bench corpus + smoke RESULTS.md (raw 31B F1 0.947, Court F1 0.571 driven by Ollama-overload errors on commodity hardware; full 200-patch run queued); 2G replay hardening with `--tolerance <float>` flag, loud digest-mismatch error naming every divergent agent + hashes, committed `test-fixtures/replay-fixture.verdict` cross-machine fixture, 10-replay variance measurement on developer machine (10/10 full-match, recommended tolerance 0.0). 200 unit/integration tests green.
 
 ## Active Blockers
 
@@ -187,10 +187,10 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2G. Replay Hardening
 
-- [ ] Document residual quantized-inference variance per platform in `docs/runtime-variance.md`
-- [ ] Replay tolerance flag exposed to CLI
-- [ ] Replay fails loudly on digest mismatch (not silently)
-- [ ] Cross-machine replay test (your machine + a CI runner)
+- [x] Document residual quantized-inference variance per platform in `docs/runtime-variance.md` (10-replay measurement on developer machine: 10/10 full-match, recommended tolerance 0.0; CI runner uses stub-LLM cross-machine test)
+- [x] Replay tolerance flag exposed to CLI (`--tolerance <float>` in [0, 1]; defaults to `DEFAULT_REPLAY_TOLERANCE = 0`; rejects out-of-range values with exit code 2)
+- [x] Replay fails loudly on digest mismatch (not silently) (`renderDigestMismatchError` names every divergent agent and prints recorded vs replay hash; CLI prints to stderr; reproducible via `scripts/demo-loud-failure.ts`)
+- [x] Cross-machine replay test (committed `test-fixtures/replay-fixture.verdict`; `src/runtime/cross-machine-replay.test.ts` loads it and asserts `tolerance=0` bit-identical replay; runs in CI as part of `pnpm test`)
 
 ### Definition of Done
 

@@ -1,0 +1,313 @@
+{
+  "bundleId": "236da0e43efbf4a88fd10366c29c25b6483c6ac7dc6177ef53937f4e10dff37b",
+  "fixture": "sample-patch",
+  "host": "Bradleys-MacBook-Pro.local",
+  "home": "/Users/brad",
+  "ollamaVersion": "0.23.1",
+  "nodeVersion": "24.15.0",
+  "capturedAt": "2026-05-08T01:23:48.557Z",
+  "summary": {
+    "n": 10,
+    "fullMatchCount": 10,
+    "perAgentMismatchCount": {
+      "prosecutor": 0,
+      "defender": 0,
+      "courtReporter": 0,
+      "jury": 0
+    },
+    "observedDivergenceFractions": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "recommendedTolerance": 0,
+    "perRunHashes": [
+      {
+        "run": 1,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 2,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 3,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 4,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 5,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 6,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 7,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 8,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 9,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      },
+      {
+        "run": 10,
+        "agents": [
+          {
+            "agent": "prosecutor",
+            "recordedHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "replayHash": "6321f51287193739ba44714a566373453fd367969b86514be2d8dae5472e06c8",
+            "match": true
+          },
+          {
+            "agent": "defender",
+            "recordedHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "replayHash": "e69ba750fb335c466bb8e991b3e685fe6e720c1a7f7cae45d4ce63aa55c6d534",
+            "match": true
+          },
+          {
+            "agent": "courtReporter",
+            "recordedHash": "<no-call>",
+            "replayHash": "<no-call>",
+            "match": true
+          },
+          {
+            "agent": "jury",
+            "recordedHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "replayHash": "a9ced27b1a358c3b10b84461db77691a816b30a705479fe6b50e453f363b17c7",
+            "match": true
+          }
+        ]
+      }
+    ]
+  }
+}

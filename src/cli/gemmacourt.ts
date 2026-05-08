@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { executeRun, parseBudgetSpec } from './run-subcommand.js';
-import { executeReplay } from './replay-subcommand.js';
+import { DEFAULT_REPLAY_TOLERANCE, executeReplay } from './replay-subcommand.js';
 import { executeVerify } from './verify-subcommand.js';
+import { renderDigestMismatchError } from '../runtime/bundle-replayer.js';
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 
@@ -66,8 +67,9 @@ Commands:
                                 --precedent (Phase 2B) queries the local ledger for prior verdicts and surfaces top matches to the Jury; implies --evidence-graph.
                                 --impact (Phase 2C) builds the import graph for the fixture's src/ tree, surfaces the ripple set to the Jury; implies --evidence-graph.
                                 --budget <spec> (Phase 2D) runs the UCB1 bandit loop after the linear pipeline; spec is "5m", "50m", "2h", "overnight", or a bare integer (seconds). Allocation trace embedded in the bundle.
-  replay <bundle> [--tolerate-hash] [--tolerate-runtime]
+  replay <bundle> [--tolerate-hash] [--tolerate-runtime] [--tolerance <float>]
                                 Re-run a bundle and report whether the response hashes match the recorded ones.
+                                --tolerance <float> sets the maximum allowed fraction of agents that may diverge in [0, 1]; defaults to the developer-machine variance documented in docs/runtime-variance.md (currently 0).
   verify <bundle>               Verify the Ed25519 signature on a bundle. No LLM calls.
 
 Flags:
@@ -203,21 +205,43 @@ export async function main(argv: readonly string[]): Promise<CliResult> {
     }
     const tolerateHash = rest.includes('--tolerate-hash');
     const tolerateRuntime = rest.includes('--tolerate-runtime');
+    const toleranceRaw = findFlagValue(rest, '--tolerance');
+    let tolerance = DEFAULT_REPLAY_TOLERANCE;
+    if (toleranceRaw !== null && toleranceRaw.length > 0) {
+      const parsed = Number.parseFloat(toleranceRaw);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+        return {
+          code: 2,
+          stdout: '',
+          stderr: `gemmacourt replay: --tolerance must be a float in [0, 1]; got "${toleranceRaw}"\n`,
+        };
+      }
+      tolerance = parsed;
+    }
     try {
       const { report } = await executeReplay({
         bundlePath,
         tolerateHashMismatch: tolerateHash,
         tolerateRuntimeDrift: tolerateRuntime,
+        tolerance,
       });
       const lines = report.agentMatches.map(
         (m) =>
           `${m.agent}: ${m.match ? 'match' : 'mismatch'} (recorded=${m.recordedHash} replay=${m.replayHash})`,
       );
-      const summary = report.fullMatch ? 'replay: bit-identical' : 'replay: divergence detected';
+      if (report.fullMatch) {
+        return {
+          code: 0,
+          stdout: `replay: bit-identical\n${lines.join('\n')}\n`,
+          stderr: '',
+        };
+      }
+      const loud = renderDigestMismatchError(report);
+      const summary = `replay: divergence detected (observed ${report.observedDivergenceFraction.toFixed(3)}, tolerance ${(report.tolerance ?? 0).toFixed(3)})`;
       return {
-        code: report.fullMatch ? 0 : 1,
+        code: 1,
         stdout: `${summary}\n${lines.join('\n')}\n`,
-        stderr: '',
+        stderr: loud.length > 0 ? `${loud}\n` : '',
       };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

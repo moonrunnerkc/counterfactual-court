@@ -3,6 +3,15 @@ import { loadSignedBundle, replayBundle, type ReplayReport } from '../runtime/bu
 import type { LlmClient } from '../runtime/llm-client.js';
 import { buildAgentContext, buildOllamaClient, loadConfig } from './build-context.js';
 
+/**
+ * Default replay tolerance, in [0, 1]. Phase 2G observed zero hash divergence
+ * across 10 replays of the Phase 1 fixture on the developer machine, so the
+ * default is 0 (strict). Operators on hardware with documented variance can
+ * override per-run via `--tolerance <float>` or set
+ * `GEMMACOURT_REPLAY_TOLERANCE` in the environment.
+ */
+export const DEFAULT_REPLAY_TOLERANCE = 0;
+
 /** Options accepted by {@link executeReplay}. */
 export interface ReplayOptions {
   readonly bundlePath: string;
@@ -14,6 +23,8 @@ export interface ReplayOptions {
   readonly tolerateRuntimeDrift?: boolean;
   /** Optional override for runtime.lock.json path. */
   readonly runtimeLockPath?: string;
+  /** Phase 2G numeric tolerance in [0, 1]. */
+  readonly tolerance?: number;
 }
 
 /** Result of {@link executeReplay}. */
@@ -42,12 +53,14 @@ export async function executeReplay(opts: ReplayOptions): Promise<ReplayOutcome>
     clockIso: bundle.body.createdAt,
     llm,
   });
+  const tolerance = opts.tolerance ?? DEFAULT_REPLAY_TOLERANCE;
   const report = await replayBundle({
     bundle,
     ctx,
     currentRuntimeLock,
     tolerateHashMismatch: opts.tolerateHashMismatch ?? false,
     tolerateRuntimeDrift: opts.tolerateRuntimeDrift ?? false,
+    tolerance,
   });
   return { report };
 }

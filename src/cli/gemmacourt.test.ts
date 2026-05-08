@@ -59,4 +59,18 @@ describe('gemmacourt CLI', () => {
     expect(result.code).toBe(2);
     expect(result.stderr).toContain('bundle path');
   });
+
+  it('rejects `replay --tolerance` with an out-of-range value (Phase 2G)', async () => {
+    const result = await main(['replay', 'bundles/none.verdict', '--tolerance', '1.5']);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('--tolerance must be a float in [0, 1]');
+  });
+
+  it('accepts `replay --tolerance` with a valid float (Phase 2G; downstream may still fail elsewhere)', async () => {
+    // Bundle path is fake, so the replay will error on load, not on flag parsing.
+    const result = await main(['replay', 'bundles/none.verdict', '--tolerance', '0.25']);
+    // Exit code 1 (load failure), not 2 (flag-validation failure) - flag is accepted.
+    expect(result.code).toBe(1);
+    expect(result.stderr).not.toContain('--tolerance must be a float');
+  });
 });

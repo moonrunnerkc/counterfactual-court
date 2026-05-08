@@ -29,6 +29,10 @@ export interface ReplayReport {
   readonly agentMatches: readonly AgentReplayMatch[];
   readonly fullMatch: boolean;
   readonly toleranceApplied: boolean;
+  /** Fraction of agents whose response hash diverged from the recorded one (0..1). */
+  readonly observedDivergenceFraction: number;
+  /** Numeric tolerance threshold the replay was scored against; null when unset. */
+  readonly tolerance: number | null;
 }
 
 /**
@@ -130,6 +134,13 @@ export interface ReplayOptions {
    * to false: replay refuses to proceed when the runtime drifts.
    */
   readonly tolerateRuntimeDrift?: boolean;
+  /**
+   * Phase 2G numeric tolerance. Maximum fraction of agents (0..1) allowed to
+   * diverge before {@link ReplayReport.fullMatch} flips to false. Default
+   * undefined = strict (zero tolerance). Supersedes `tolerateHashMismatch`
+   * when both are set; the boolean form remains for backward compatibility.
+   */
+  readonly tolerance?: number;
 }
 
 /**
@@ -207,8 +218,13 @@ export async function replayBundle(opts: ReplayOptions): Promise<ReplayReport> {
   ];
 
   const allHashesMatch = agentMatches.every((m) => m.match);
-  const fullMatch =
-    sig.ok && runtimeDiffs.length === 0 && (allHashesMatch || opts.tolerateHashMismatch === true);
+  const mismatchedAgents = agentMatches.filter((m) => !m.match).length;
+  const observedDivergenceFraction =
+    agentMatches.length === 0 ? 0 : mismatchedAgents / agentMatches.length;
+  const tolerance = typeof opts.tolerance === 'number' ? opts.tolerance : null;
+  const numericTolerancePasses = tolerance !== null && observedDivergenceFraction <= tolerance;
+  const hashesPass = allHashesMatch || opts.tolerateHashMismatch === true || numericTolerancePasses;
+  const fullMatch = sig.ok && runtimeDiffs.length === 0 && hashesPass;
 
   return {
     signatureOk: sig.ok,
@@ -217,6 +233,32 @@ export async function replayBundle(opts: ReplayOptions): Promise<ReplayReport> {
     fullMatch,
     toleranceApplied:
       (opts.tolerateHashMismatch === true && !allHashesMatch) ||
+      (numericTolerancePasses && !allHashesMatch) ||
       (opts.tolerateRuntimeDrift === true && runtimeDiffs.length > 0),
+    observedDivergenceFraction,
+    tolerance,
   };
+}
+
+/**
+ * Render an actionable digest-mismatch error message that names every
+ * divergent agent and its recorded vs replay hash. Used by the CLI's
+ * `replay` subcommand and by tests that exercise the loud-failure path.
+ *
+ * @param report Replay report.
+ * @returns Multi-line error text; empty when the replay was bit-identical.
+ */
+export function renderDigestMismatchError(report: ReplayReport): string {
+  const mismatches = report.agentMatches.filter((m) => !m.match);
+  if (mismatches.length === 0) return '';
+  const lines: string[] = [
+    `replay: digest mismatch on ${mismatches.length}/${report.agentMatches.length} agent(s); observed divergence fraction ${report.observedDivergenceFraction.toFixed(3)}${report.tolerance !== null ? ` (tolerance ${report.tolerance.toFixed(3)})` : ''}`,
+  ];
+  for (const m of mismatches) {
+    lines.push(`  ${m.agent}: recorded=${m.recordedHash} replay=${m.replayHash}`);
+  }
+  lines.push(
+    'either re-record the bundle on this hardware or pass --tolerance <fraction> with a value at least equal to the observed divergence',
+  );
+  return lines.join('\n');
 }
