@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A-2G complete; final acceptance pending (real-bandit multi-file-e2e + re-baseline)
+**Phase:** Phase 2 complete, Phase 3 ready.
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A-2G landed: 2A-2E behind feature flags; 2F bench corpus + smoke RESULTS.md (raw 31B F1 0.947, Court F1 0.571 driven by Ollama-overload errors on commodity hardware; full 200-patch run queued); 2G replay hardening with `--tolerance <float>` flag, loud digest-mismatch error naming every divergent agent + hashes, committed `test-fixtures/replay-fixture.verdict` cross-machine fixture, 10-replay variance measurement on developer machine (10/10 full-match, recommended tolerance 0.0). 200 unit/integration tests green.
+**One-line:** Phase 1 closed; Phase 2A-2G shipped behind feature flags. Final acceptance landed: real-Gemma-4 bandit e2e on `multi-file-e2e` produced bundle `0a7e14156abbfd65e7e5751045de8e6c714c0a29b25609d9c4e139b2c26228e7` with an 8-node 8-edge evidence graph, 1 precedent citation (sim 0.990 against the seeded sample-patch verdict), 3 ripple citations (calculator/cli/report) at depth 1-2, and a 10-step UCB1 trace covering all three arms with real LLM rewards (P=4 sum 4.0, D=2 sum 0.05, J=4 sum 4.0). Phase 1 regression gate green (legacy-path bit-identical replay). 200 unit/integration tests green. Tag `phase-2-baseline` set at HEAD.
 
 ## Active Blockers
 

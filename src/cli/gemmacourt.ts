@@ -67,6 +67,7 @@ Commands:
                                 --precedent (Phase 2B) queries the local ledger for prior verdicts and surfaces top matches to the Jury; implies --evidence-graph.
                                 --impact (Phase 2C) builds the import graph for the fixture's src/ tree, surfaces the ripple set to the Jury; implies --evidence-graph.
                                 --budget <spec> (Phase 2D) runs the UCB1 bandit loop after the linear pipeline; spec is "5m", "50m", "2h", "overnight", or a bare integer (seconds). Allocation trace embedded in the bundle.
+                                --bandit-mode real|synthetic (default real with --budget) chooses whether each rollout calls real Gemma 4 or uses the deterministic synthetic executor.
   replay <bundle> [--tolerate-hash] [--tolerate-runtime] [--tolerance <float>]
                                 Re-run a bundle and report whether the response hashes match the recorded ones.
                                 --tolerance <float> sets the maximum allowed fraction of agents that may diverge in [0, 1]; defaults to the developer-machine variance documented in docs/runtime-variance.md (currently 0).
@@ -160,6 +161,18 @@ export async function main(argv: readonly string[]): Promise<CliResult> {
         };
       }
     }
+    const banditModeRaw = findFlagValue(rest, '--bandit-mode');
+    let banditMode: 'real' | 'synthetic' | undefined;
+    if (banditModeRaw !== null && banditModeRaw.length > 0) {
+      if (banditModeRaw !== 'real' && banditModeRaw !== 'synthetic') {
+        return {
+          code: 2,
+          stdout: '',
+          stderr: `gemmacourt run: --bandit-mode must be "real" or "synthetic"; got "${banditModeRaw}"\n`,
+        };
+      }
+      banditMode = banditModeRaw;
+    }
     try {
       const outcome = await executeRun({
         fixture,
@@ -167,6 +180,7 @@ export async function main(argv: readonly string[]): Promise<CliResult> {
         forcePrecedent: precedent,
         forceMonorepoImpact: impact,
         ...(budgetMs === undefined ? {} : { budgetMs }),
+        ...(banditMode === undefined ? {} : { banditMode }),
       });
       if (graphOnly) {
         if (outcome.evidenceGraph === null) {

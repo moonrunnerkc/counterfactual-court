@@ -1,0 +1,6 @@
+{
+  "name": "multi-file-e2e",
+  "description": "Final-acceptance multi-file fixture. Patches math.ts to swap add/sub. The monorepo has 5 files; the ripple set has 4 entries (calculator, index, cli, report). Designed to exercise evidence graph + precedent ledger + monorepo tracing + UCB1 bandit together under --budget 5m --precedent.",
+  "language": "typescript",
+  "linesChanged": 4
+}

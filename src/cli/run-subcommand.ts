@@ -7,6 +7,7 @@ import type { LlmClient } from '../runtime/llm-client.js';
 import type { Config } from '../runtime/config.js';
 import type { EvidenceGraph } from '../evidence/graph.js';
 import { type AllocationTrace, type ArmExecutor, parseBudgetSpec } from '../budget/orchestrator.js';
+import { createRealBanditExecutor } from '../budget/real-executor.js';
 import { buildAgentContext, buildOllamaClient, loadConfig } from './build-context.js';
 import { loadFixture } from './load-fixture.js';
 
@@ -51,6 +52,14 @@ export interface RunOptions {
    * bundle-trace round-trip can be exercised without spending wall time.
    */
   readonly budgetExecutor?: ArmExecutor;
+  /**
+   * Phase 2D / final-acceptance toggle. `'real'` (default for `--budget`
+   * runs) drives each rollout via a real Gemma 4 LLM call so the
+   * allocation trace reflects actual reward signals. `'synthetic'` uses
+   * the deterministic per-arm constants documented in ADR-003 and is the
+   * cheaper option for tests and demos.
+   */
+  readonly banditMode?: 'real' | 'synthetic';
 }
 
 /** Result returned by {@link executeRun}. */
@@ -116,7 +125,15 @@ export async function executeRun(opts: RunOptions): Promise<RunOutcome> {
       ? undefined
       : {
           budgetMs,
-          executor: opts.budgetExecutor ?? defaultBanditExecutor(budgetMs),
+          executor:
+            opts.budgetExecutor ??
+            (opts.banditMode === 'synthetic'
+              ? defaultBanditExecutor(budgetMs)
+              : createRealBanditExecutor(ctx, {
+                  patch: inputs.patch,
+                  repoSnippet: inputs.repoSnippet,
+                  styleDocs: inputs.styleDocs,
+                })),
         };
   const runCourtDeps =
     budget === undefined ? { ctx, runtimeLock, baseSeed } : { ctx, runtimeLock, baseSeed, budget };
