@@ -73,3 +73,23 @@ where `graphNodeDelta` is the increase in the evidence graph's node count produc
 - The bandit state is initialized empty per run; we do not carry exploration history across runs because the patches are different bandits.
 - Exploration coefficient `c` defaults to 2 (textbook UCB1). Adjusting it is an ADR change, not a code-level decision.
 - The allocation trace is recorded into the bundle so a replay can reconstruct exactly which arm was pulled at which step under which UCB scores.
+
+---
+
+## ADR-004: Defender model assignment moved from `gemma4:26b-a4b-it-q8_0` to `gemma4:e4b-it-q8_0`
+
+**Status:** Accepted. 2026-05-07. Supersedes the Defender row of ADR-001.
+
+**Decision:** The Defender now runs on `gemma4:e4b-it-q8_0`, the same model the Prosecutor and Court Reporter use. The 26B MoE variant is no longer pinned in `runtime.lock.json` for production paths.
+
+**Rationale:** ADR-001 paired the Defender with the 26B MoE variant for "high-throughput reasoning." In practice, the q8_0 quants of all three originally-assigned models (e4b 11 GB + 26b-a4b 28 GB + 31b 33 GB = 72 GB) exceed Ollama's effective VRAM budget on the consumer M5 Max hardware Phase 1 was developed on. Each Court row triggers two model swaps (e4b→26b for the Defender, 26b→31b for the Jury); under load (Phase 2F bench against 100 patches), Ollama 0.23.1 occasionally hangs mid-swap and our requests time out even with a 30-minute undici dispatcher. The first MaliciousPatch-Bench smoke saw 60% of Court rows fail this way.
+
+Collapsing the Defender to e4b leaves two distinct model files (e4b 11 GB, 31b 33 GB = 44 GB) which fit in VRAM with headroom on any 64 GB+ Mac. Architecturally this matches what ADR-001 already accepted for the Court Reporter ("two roles share a model file. The runtime treats them as distinct agents (distinct prompts, distinct seeds, distinct exhibits)"). The Defender's task — rebut Prosecutor exhibits one at a time — does not actually require the MoE's reasoning headroom; the bottleneck was prompt-following, which `format: 'json'` plus a tighter system prompt addresses for any Gemma 4 size.
+
+**Consequences:**
+
+- `runtime.lock.json` drops the `gemma4:26b-a4b-it-q8_0` entry from the active set. The lockfile retains it as a legacy reference only.
+- Every recorded bundle generated before this ADR has a different defender `responseHash`. The Phase 1 fixture is re-recorded; the cross-machine fixture (`test-fixtures/replay-fixture.verdict`) is regenerated.
+- Bench's Court runs no longer thrash models, eliminating the dominant failure mode in `bench/RESULTS.md`.
+- The contest pitch's "four models" framing remains accurate at the variant-tag level (e4b, 31b are two; the e4b shared between Prosecutor, Defender, and Court Reporter is one model file run with three distinct prompts and three distinct seeds, exactly as ADR-001 already framed for the Court Reporter case).
+- The 26B MoE variant remains a future option if the contest demo runs on hardware with enough VRAM. ADR-001's rationale for the MoE choice is preserved here and can be re-activated by reverting the constant in `src/agents/defender.ts` and re-pinning the digest.

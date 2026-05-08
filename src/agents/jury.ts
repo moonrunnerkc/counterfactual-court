@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { AgentContext } from '../runtime/agent-context.js';
 import { parseJsonResponse } from './parse-json-response.js';
 import {
@@ -7,6 +8,9 @@ import {
   type ProsecutionDossier,
   type ReporterExhibits,
 } from '../evidence/schema.js';
+
+const JURY_OPINION_JSON_SCHEMA = z.toJSONSchema(JuryOpinion) as Record<string, unknown>;
+const RAW_JURY_GRAPH_JSON_SCHEMA = z.toJSONSchema(RawJuryGraphSchema) as Record<string, unknown>;
 import { buildEvidenceGraph, parseRawJuryGraph } from '../evidence/builder.js';
 import { renderOpinionFromGraph } from '../evidence/render-opinion.js';
 import type { PrecedentNodePayload, RawJuryGraph } from '../evidence/graph.js';
@@ -204,6 +208,8 @@ export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
     topP: 0.95,
     topK: 40,
     seed,
+    format: useGraph ? RAW_JURY_GRAPH_JSON_SCHEMA : JURY_OPINION_JSON_SCHEMA,
+    keepAlive: '15m',
   });
 
   if (!useGraph) {

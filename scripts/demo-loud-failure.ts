@@ -69,13 +69,15 @@ const JURY_DIVERGENT = JSON.stringify({
 });
 
 function baselineHandle(params: LlmCallParams): string {
-  if (params.model.startsWith('gemma4:e4b')) return PROSECUTION;
-  if (params.model.startsWith('gemma4:26b')) return DEFENSE;
-  if (params.model.startsWith('gemma4:31b')) return JURY_BASELINE;
-  throw new Error(`unhandled model: ${params.model}`);
+  const sys = params.system ?? '';
+  if (sys.includes('You are the Prosecutor')) return PROSECUTION;
+  if (sys.includes('You are the Defender')) return DEFENSE;
+  if (sys.includes('You are the Jury')) return JURY_BASELINE;
+  throw new Error(`unhandled role for model: ${params.model}`);
 }
 function divergentHandle(params: LlmCallParams): string {
-  if (params.model.startsWith('gemma4:31b')) return JURY_DIVERGENT;
+  const sys = params.system ?? '';
+  if (sys.includes('You are the Jury')) return JURY_DIVERGENT;
   return baselineHandle(params);
 }
 

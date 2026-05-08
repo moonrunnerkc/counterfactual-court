@@ -47,10 +47,11 @@ const RAW_GRAPH = JSON.stringify({
 });
 
 function smokeHandle(params: LlmCallParams): string {
-  if (params.model.startsWith('gemma4:e4b')) return PROSECUTION;
-  if (params.model.startsWith('gemma4:26b')) return DEFENSE;
-  if (params.model.startsWith('gemma4:31b')) return RAW_GRAPH;
-  throw new Error(`smoke: unhandled model ${params.model}`);
+  const sys = params.system ?? '';
+  if (sys.includes('You are the Prosecutor')) return PROSECUTION;
+  if (sys.includes('You are the Defender')) return DEFENSE;
+  if (sys.includes('You are the Jury')) return RAW_GRAPH;
+  throw new Error(`smoke: unhandled role for model ${params.model}`);
 }
 
 describe.skipIf(!manifestExists)('bench smoke (10-patch subset, stub LLM)', () => {

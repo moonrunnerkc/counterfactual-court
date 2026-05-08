@@ -58,10 +58,14 @@ const JURY = JSON.stringify({
 });
 
 function handle(params: LlmCallParams): string {
-  if (params.model.startsWith('gemma4:e4b')) return PROSECUTION;
-  if (params.model.startsWith('gemma4:26b')) return DEFENSE;
-  if (params.model.startsWith('gemma4:31b')) return JURY;
-  throw new Error(`replay-fixture: unhandled model ${params.model}`);
+  // Dispatch by role (system-prompt identity) rather than model name. ADR-004
+  // collapsed Prosecutor and Defender to share the e4b model file, so the
+  // dispatcher can no longer key off the model tag alone.
+  const sys = params.system ?? '';
+  if (sys.includes('You are the Prosecutor')) return PROSECUTION;
+  if (sys.includes('You are the Defender')) return DEFENSE;
+  if (sys.includes('You are the Jury')) return JURY;
+  throw new Error(`replay-fixture: unhandled role for model ${params.model}`);
 }
 
 async function main(): Promise<void> {

@@ -1,8 +1,11 @@
+import { z } from 'zod';
 import type { AgentContext } from '../runtime/agent-context.js';
 import { parseJsonResponse } from './parse-json-response.js';
 import { ReporterExhibits, type ReporterExhibit } from '../evidence/schema.js';
 import { extractMermaidBlocks } from '../multimodal/mermaid-extract.js';
 import { detectDiagramDivergences } from '../multimodal/divergence.js';
+
+const REPORTER_EXHIBITS_JSON_SCHEMA = z.toJSONSchema(ReporterExhibits) as Record<string, unknown>;
 
 /** Default Ollama tag for the Court Reporter. Same model as the Prosecutor; different role. */
 export const COURT_REPORTER_MODEL = 'gemma4:e4b-it-q8_0';
@@ -111,6 +114,8 @@ export async function reportCourt(input: CourtReporterInput): Promise<ReporterEx
     topK: 40,
     seed,
     images: attachments.map((a) => a.base64),
+    format: REPORTER_EXHIBITS_JSON_SCHEMA,
+    keepAlive: '15m',
   });
   const llmExhibits = parseJsonResponse(result.text, ReporterExhibits, 'court-reporter');
   const merged: ReporterExhibits = {

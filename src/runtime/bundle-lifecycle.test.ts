@@ -55,10 +55,11 @@ const JURY_RESPONSE = JSON.stringify({
 });
 
 function handle(params: LlmCallParams): string {
-  if (params.model.startsWith('gemma4:e4b')) return PROSECUTION_RESPONSE;
-  if (params.model.startsWith('gemma4:26b')) return DEFENSE_RESPONSE;
-  if (params.model.startsWith('gemma4:31b')) return JURY_RESPONSE;
-  throw new Error(`unhandled model: ${params.model}`);
+  const sys = params.system ?? '';
+  if (sys.includes('You are the Prosecutor')) return PROSECUTION_RESPONSE;
+  if (sys.includes('You are the Defender')) return DEFENSE_RESPONSE;
+  if (sys.includes('You are the Jury')) return JURY_RESPONSE;
+  throw new Error(`unhandled role for model: ${params.model}`);
 }
 
 const INPUTS = {

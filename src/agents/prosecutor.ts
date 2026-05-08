@@ -1,6 +1,12 @@
+import { z } from 'zod';
 import type { AgentContext } from '../runtime/agent-context.js';
 import { parseJsonResponse } from './parse-json-response.js';
 import { ProsecutionDossier } from '../evidence/schema.js';
+
+const PROSECUTION_DOSSIER_JSON_SCHEMA = z.toJSONSchema(ProsecutionDossier) as Record<
+  string,
+  unknown
+>;
 
 /** Default Ollama tag for the Prosecutor. Pinned to a digest in runtime.lock.json. */
 export const PROSECUTOR_MODEL = 'gemma4:e4b-it-q8_0';
@@ -74,6 +80,8 @@ export async function prosecute(input: ProsecutorInput): Promise<ProsecutionDoss
     topP: 0.95,
     topK: 40,
     seed,
+    format: PROSECUTION_DOSSIER_JSON_SCHEMA,
+    keepAlive: '15m',
   });
   const dossier = parseJsonResponse(result.text, ProsecutionDossier, 'prosecutor');
   log.info('agent.done', {

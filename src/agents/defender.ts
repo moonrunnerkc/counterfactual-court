@@ -1,9 +1,18 @@
+import { z } from 'zod';
 import type { AgentContext } from '../runtime/agent-context.js';
 import { parseJsonResponse } from './parse-json-response.js';
 import { DefenseDossier, type ProsecutionDossier } from '../evidence/schema.js';
 
-/** Default Ollama tag for the Defender. Pinned to a digest in runtime.lock.json. */
-export const DEFENDER_MODEL = 'gemma4:26b-a4b-it-q8_0';
+const DEFENSE_DOSSIER_JSON_SCHEMA = z.toJSONSchema(DefenseDossier) as Record<string, unknown>;
+
+/**
+ * Default Ollama tag for the Defender. Per ADR-004 the Defender shares the
+ * `e4b-it-q8_0` model file with the Prosecutor and Court Reporter; running
+ * three distinct quantized models in VRAM was the dominant failure mode in
+ * Phase 2F bench. The Defender is still a logically distinct agent (its own
+ * prompt, its own seed, its own exhibits).
+ */
+export const DEFENDER_MODEL = 'gemma4:e4b-it-q8_0';
 
 const MAX_SEED = 2 ** 31 - 1;
 
@@ -77,6 +86,8 @@ export async function defend(input: DefenderInput): Promise<DefenseDossier> {
     topP: 0.95,
     topK: 40,
     seed,
+    format: DEFENSE_DOSSIER_JSON_SCHEMA,
+    keepAlive: '15m',
   });
   const defense = parseJsonResponse(result.text, DefenseDossier, 'defender');
   log.info('agent.done', {

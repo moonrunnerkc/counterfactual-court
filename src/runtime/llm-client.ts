@@ -1,5 +1,21 @@
+import { Agent, fetch as undiciFetch } from 'undici';
 import { contentHash, sha256Hex } from './canonical.js';
 import type { Logger } from './log.js';
+
+/**
+ * Long-timeout undici Agent for Ollama's `/api/generate`. The default
+ * headers-timeout (300_000 ms) fires while Ollama is loading a 28-33 GB
+ * Gemma 4 model into VRAM on first use, surfacing as `fetch failed` even
+ * though the server is still working. We reset both timeouts to 30 minutes
+ * because the longest legitimate response we have observed is the 31B Jury
+ * on a multi-thousand-token prompt at q8_0.
+ */
+const OLLAMA_HEADERS_TIMEOUT_MS = 30 * 60 * 1000;
+const OLLAMA_BODY_TIMEOUT_MS = 30 * 60 * 1000;
+const ollamaAgent = new Agent({
+  headersTimeout: OLLAMA_HEADERS_TIMEOUT_MS,
+  bodyTimeout: OLLAMA_BODY_TIMEOUT_MS,
+});
 
 /**
  * Parameters for a single LLM call. Every sampling knob is required so that
@@ -25,8 +41,15 @@ export interface LlmCallParams {
   readonly topK: number;
   /** Seed routed to the underlying sampler. Non-negative integer. */
   readonly seed: number;
-  /** Force structured output. Currently only `json`. */
-  readonly format?: 'json';
+  /**
+   * Force structured output. Either the literal `'json'` (Ollama's
+   * unrestricted JSON mode) or a JSON Schema object — Ollama 0.5.0+
+   * constrains the decoder to outputs that satisfy the schema. We pass
+   * zod-derived JSON Schemas for every agent so the decoder cannot drift
+   * out of the typed contract (eliminating the `verdict.verdict: Invalid
+   * option` and missing-required-field failure modes).
+   */
+  readonly format?: 'json' | Record<string, unknown>;
   /** Max tokens to generate. Mapped to Ollama's `num_predict`. */
   readonly maxTokens?: number;
   /** Optional stop sequences. */
@@ -38,6 +61,19 @@ export interface LlmCallParams {
    * model's responsibility.
    */
   readonly images?: readonly string[];
+  /**
+   * Optional Ollama `keep_alive` hint controlling how long the model stays
+   * resident in VRAM after this call. Accepts the strings Ollama accepts
+   * (e.g. `"15m"`, `"1h"`, `"0"`) or a duration in seconds (number).
+   *
+   * Excluded from {@link computePromptHash} on purpose: keep_alive is a
+   * server-side caching hint, not a sampling parameter. It changes how long
+   * Ollama keeps weights loaded but does not change the decoded output for
+   * a fixed (prompt, seed, sampling-params) tuple. Including it in the
+   * promptHash would break determinism replay across operators who set
+   * different keep_alive values for performance.
+   */
+  readonly keepAlive?: string | number;
 }
 
 /** Result of an LLM call. All fields are required so logs and bundles agree. */
@@ -103,8 +139,14 @@ export function validateLlmCallParams(params: LlmCallParams): void {
       );
     }
   }
-  if (p['format'] !== undefined && p['format'] !== 'json') {
-    throw new Error('llm call params: `format`, if set, must be the string "json"');
+  if (p['format'] !== undefined) {
+    const f = p['format'];
+    const ok = f === 'json' || (typeof f === 'object' && f !== null && !Array.isArray(f));
+    if (!ok) {
+      throw new Error(
+        'llm call params: `format`, if set, must be the string "json" or a JSON Schema object',
+      );
+    }
   }
   if (p['maxTokens'] !== undefined) {
     const v = p['maxTokens'];
@@ -124,6 +166,12 @@ export function validateLlmCallParams(params: LlmCallParams): void {
       throw new Error(
         'llm call params: `images`, if set, must be an array of non-empty base64 strings',
       );
+    }
+  }
+  if (p['keepAlive'] !== undefined) {
+    const v = p['keepAlive'];
+    if (typeof v !== 'string' && typeof v !== 'number') {
+      throw new Error('llm call params: `keepAlive`, if set, must be a string or a number');
     }
   }
 }
@@ -156,6 +204,15 @@ export interface OllamaLlmClientOptions {
   readonly logger: Logger;
   /** Override for testing. Defaults to globalThis.fetch. */
   readonly fetchImpl?: typeof fetch;
+  /**
+   * Maximum retry attempts on a transient `fetch failed` error (Ollama
+   * dropping the connection while loading a model into VRAM). Default 2,
+   * for a total of 3 attempts. The retry pauses 5s, then 15s. Successful
+   * responses always return on the first attempt; only network-level
+   * failures retry. HTTP non-200 responses do not retry because those
+   * indicate request-level problems the operator must fix.
+   */
+  readonly maxRetries?: number;
 }
 
 /** Shape of the Ollama /api/generate response we care about. */
@@ -176,9 +233,17 @@ interface OllamaGenerateResponse {
  * @returns An LlmClient that POSTs to `${baseUrl}/api/generate`.
  */
 export function createOllamaLlmClient(opts: OllamaLlmClientOptions): LlmClient {
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  // Use undici's fetch with a long-timeout dispatcher unless the caller
+  // injected a fetchImpl (tests do). The dispatcher is only attached when
+  // we are using undici's fetch; injected impls keep their own behavior.
+  const fetchImpl =
+    opts.fetchImpl ??
+    ((url: string, init?: Parameters<typeof undiciFetch>[1]): Promise<Response> =>
+      undiciFetch(url, { ...init, dispatcher: ollamaAgent }) as unknown as Promise<Response>);
   const baseUrl = opts.baseUrl;
   const logger = opts.logger;
+  const maxRetries = opts.maxRetries ?? 2;
+  const retryDelaysMs = [5_000, 15_000];
 
   return {
     async call(params: LlmCallParams): Promise<LlmCallResult> {
@@ -191,6 +256,7 @@ export function createOllamaLlmClient(opts: OllamaLlmClientOptions): LlmClient {
         ...(params.images !== undefined ? { images: [...params.images] } : {}),
         stream: false,
         ...(params.format !== undefined ? { format: params.format } : {}),
+        ...(params.keepAlive !== undefined ? { keep_alive: params.keepAlive } : {}),
         options: {
           temperature: params.temperature,
           top_p: params.topP,
@@ -201,18 +267,37 @@ export function createOllamaLlmClient(opts: OllamaLlmClientOptions): LlmClient {
         },
       });
       const url = `${baseUrl}/api/generate`;
-      let res: Response;
-      try {
-        res = await fetchImpl(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body,
-        });
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          `ollama POST ${url} failed: ${reason}; verify the Ollama server is running and reachable`,
-        );
+      let res: Response | undefined;
+      let lastError = '';
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          res = await fetchImpl(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body,
+          });
+          break;
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err);
+          if (attempt === maxRetries) {
+            throw new Error(
+              `ollama POST ${url} failed: ${lastError}; verify the Ollama server is running and reachable (retried ${maxRetries} times)`,
+            );
+          }
+          const delay = retryDelaysMs[attempt] ?? 5_000;
+          logger.warn('llm.retry', {
+            url,
+            reason: lastError,
+            attempt: attempt + 1,
+            nextDelayMs: delay,
+          });
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, delay);
+          });
+        }
+      }
+      if (res === undefined) {
+        throw new Error(`ollama POST ${url} failed: ${lastError}; no response after retries`);
       }
       if (!res.ok) {
         const detail = await res.text().catch(() => '<unreadable>');
