@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** Phase 2 complete, Phase 3 ready.
-**Date:** 7 May 2026
-**Days remaining to submission:** 17
-**One-line:** Phase 1 closed; Phase 2A-2G shipped behind feature flags. Final acceptance landed: real-Gemma-4 bandit e2e on `multi-file-e2e` produced bundle `0a7e14156abbfd65e7e5751045de8e6c714c0a29b25609d9c4e139b2c26228e7` with an 8-node 8-edge evidence graph, 1 precedent citation (sim 0.990 against the seeded sample-patch verdict), 3 ripple citations (calculator/cli/report) at depth 1-2, and a 10-step UCB1 trace covering all three arms with real LLM rewards (P=4 sum 4.0, D=2 sum 0.05, J=4 sum 4.0). Phase 1 regression gate green (legacy-path bit-identical replay). 200 unit/integration tests green. Tag `phase-2-baseline` set at HEAD.
+**Phase:** Phase 3 — content drafted; pending bench numbers, demo recording, manual submission.
+**Date:** 8 May 2026
+**Days remaining to submission:** 16
+**One-line:** Phase 3A-3D drafted in this pass: showcase target locked (vitejs/vite-plugin-react#1192), `bin/run-showcase.sh` and `bin/demo-replay.sh` are idempotent and shellcheck-clean, `docs/showcase-pr.md` and `docs/demo-script.md` ship with full beat-by-beat material, README.md / docs/PRIOR_ART.md / content/devto-post.md / content/linkedin-post.md / content/x-thread.md are written under the anti-AI-tells discipline, `docs/release-notes-v0.1.0.md` and `bin/cut-release.sh` are ready. Brad still runs the showcase, records the video, fills bench numbers, and files 3E.
 
 ## Active Blockers
 
@@ -217,36 +217,40 @@ Never cut: evidence graph, precedent ledger, monorepo impact tracing, MaliciousP
 
 ### 3A. Target Repo Demo
 
-- [ ] Pick high-visibility OSS target (Vite plugin or non-trivial Rust crate)
-- [ ] Run full court on a real PR there
-- [ ] Capture the resulting bundle as the showcase artifact
+- [x] Pick high-visibility OSS target (Vite plugin or non-trivial Rust crate) — picked vitejs/vite-plugin-react#1192 (`fix(rsc): include bundled server CSS when cssCodeSplit is false`); rationale + verification steps in `docs/showcase-pr.md`.
+- [x] Drafted: `bin/run-showcase.sh` clones the target at the PR base, fetches the patch, builds `fixtures/showcase-vite-rsc/`, and invokes `gemmacourt run --evidence-graph --precedent --impact --budget 50m` writing into `bundles/showcase/`. Idempotent. Shellcheck-clean.
+- [ ] Deferred to Brad: actually run `bin/run-showcase.sh` to produce the showcase bundle.
+- [ ] Deferred to Brad: capture the resulting bundle as the showcase artifact (path target: `bundles/showcase/<id>.verdict`).
 
 ### 3B. 90-Second Screen Recording
 
-Storyboard (each beat times-out at ~15s):
-- [ ] Beat 1: PR opens, `gemmacourt run` invoked
-- [ ] Beat 2: Prosecutor exhibits stream live
-- [ ] Beat 3: Defender rebuttals stream live
-- [ ] Beat 4: Jury renders opinion with dissent
-- [ ] Beat 5: Wi-Fi off, `gemmacourt replay` reproduces bit-identical
-- [ ] Beat 6: Second similar PR, jury cites precedent from first
-- [ ] Final: bundle hash + GitHub link onscreen
+Storyboard (each beat times-out at ~15s); the storyboard, ASCII frames, captions, and exact CLI commands are in `docs/demo-script.md`. `bin/demo-replay.sh` runs beat 5 with an explicit network-off guard and is shellcheck-clean.
+
+- [x] Beat 1: PR opens, `gemmacourt run` invoked (script + caption drafted)
+- [x] Beat 2: Prosecutor exhibits stream live (script drafted, output blocks marked as placeholder for paste-in)
+- [x] Beat 3: Defender rebuttals stream live (script drafted, output blocks marked as placeholder)
+- [x] Beat 4: Jury renders opinion with dissent (script drafted, output blocks marked as placeholder)
+- [x] Beat 5: Wi-Fi off, `gemmacourt replay` reproduces bit-identical (script drafted; `bin/demo-replay.sh` written)
+- [x] Beat 6: Second similar PR, jury cites precedent from first (script drafted; follow-up fixture instructions in the doc)
+- [x] Final: bundle hash + GitHub link onscreen (drafted as overlay frame at end of beat 6)
+- [ ] Deferred to Brad: actually record the 90-second video using `docs/demo-script.md`.
 
 ### 3C. Public Content
 
-- [ ] README.md final version (architecture diagram, install, demo GIF, links)
-- [ ] PRIOR_ART.md final pass (Swarm Orchestrator + CodeAgora + diffray + LangGraph deltas)
-- [ ] dev.to post draft (demo GIF first, model-selection table, novel mechanics, benchmark table, PRIOR_ART excerpt, 60-second npx try-it)
-- [ ] dev.to post peer-reviewed against the no-AI-tells / no-fabricated-metrics rules
-- [ ] LinkedIn post (short, links to dev.to)
-- [ ] X thread (5-7 posts, each carries info)
+- [x] README.md final version (architecture diagram in mermaid, install, model assignment table, four differentiators with concrete examples, demo GIF placeholder at `docs/demo.gif`, links)
+- [x] PRIOR_ART.md final pass: table format with columns Feature / Swarm Orchestrator / CodeAgora / diffray / LangGraph review pipelines / CodeRabbit / delta; rows for adversarial debate, precedent reuse, evidence graph, dynamic budget, monorepo tracing, multimodal exhibits, signed replayable bundles. All competitor links return HTTP 200 (logged at `PRIOR_ART_LINK_CHECK.txt`, gitignored).
+- [x] dev.to post draft at `content/devto-post.md` (front matter `published: false`, demo GIF reference at top, four-variant model table, four mechanics each backed by a real verdict, benchmark table with TBD cells, PRIOR_ART excerpt of the bundles row, 60-second try-it block, `{% github %}` and `{% embed %}` Liquid tags).
+- [x] Public content peer-reviewed against the no-AI-tells / no-fabricated-metrics rules: zero em dashes anywhere under README.md / docs/ / content/ / bin/ (grep clean); no banned phrases; bench numbers left as TBD in `content/devto-post.md` and `docs/release-notes-v0.1.0.md` until Phase 2F's full 200-patch run lands.
+- [x] LinkedIn post at `content/linkedin-post.md` (5 paragraphs, hook first, dev.to link last, three hashtags, no `I'm excited` opener).
+- [x] X thread at `content/x-thread.md` (7 posts; each under 280 chars; no `🧵`, no `1/` numbering; last post is the GitHub link).
+- [ ] Deferred to Brad: the demo GIF itself at `docs/demo.gif`. Recorded per `docs/demo-script.md`.
+- [ ] Deferred to Brad: real bench numbers replacing TBD cells in `content/devto-post.md` and `docs/release-notes-v0.1.0.md`. Filled from Phase 2F output (`bench/RESULTS.md`).
 
 ### 3D. GitHub Release
 
-- [ ] Tag `v0.1.0`
-- [ ] Release notes with bundle hash of showcase verdict
-- [ ] Attach the showcase `.verdict` bundle to the release
-- [ ] Attach `runtime.lock.json` to the release
+- [x] Release notes drafted at `docs/release-notes-v0.1.0.md` with model variants, runtime requirements (Ollama 0.23.1, Node 20+), residual-variance disclosure, and a placeholder line for the showcase bundle hash + sha-256 (Brad fills in after running `bin/run-showcase.sh`).
+- [x] `bin/cut-release.sh` drafted: idempotent. Verifies showcase bundle exists, runtime.lock.json exists, working tree is clean; creates `v0.1.0` tag if missing, pushes to origin, runs `gh release create v0.1.0 --notes-file docs/release-notes-v0.1.0.md` with bundle and lockfile attached. Skips if release already exists. Shellcheck-clean.
+- [ ] Deferred to Brad: actually run `bin/cut-release.sh` after the showcase bundle is written.
 
 ### 3E. Contest Submission
 

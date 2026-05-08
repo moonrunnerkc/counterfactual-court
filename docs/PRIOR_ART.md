@@ -1,72 +1,36 @@
 # Prior Art
 
-This document credits prior systems in the same neighborhood and enumerates the explicit deltas Counterfactual Court contributes. Citing prior work is not a weakness; it is how the design rationale earns trust.
+Counterfactual Court is not the first multi-agent code-review system. The point of this document is to credit the work it builds on, name what each prior system does well, and state precisely where Counterfactual Court differs. Citations are included for every behavior described in someone else's row; the citation is the competitor's README, docs, or a blog post they published. If a competitor adds one of these features later, this table should be updated, not deleted.
 
-The four contributions Counterfactual Court claims as novel: (1) signed, bit-identical replayable verdict bundles; (2) cross-repository precedent ledger with citable evidence chains; (3) structured, machine-queryable evidence graph as primary output; (4) dynamic adversarial compute budget allocated by a UCB bandit. (5, supporting) full-monorepo impact tracing inside a 128k context window. (6, supporting) capability-matched assignment of every Gemma 4 variant to a job designed for its strengths.
+## Comparison
 
-## Swarm Orchestrator
+The table is read row by row. A blank cell means "the public documentation does not describe this feature." A "no" means the documentation describes the absence of the feature or describes a different shape that is incompatible. Counterfactual Court's column is the delta, not a duplicate boast.
 
-https://github.com/moonrunnerkc/swarm-orchestrator
-
-A multi-agent orchestrator that runs an "adversarial battery" of LLM critics over a target. The primary inspiration for the multi-agent shape and the adversarial framing.
-
-**What it does:** Fixed-cardinality battery of critics with a final reconciler. Useful as a one-shot review tool.
-
-**Counterfactual Court delta:** The battery is replaced by a court with role specialization, a dynamic UCB-allocated budget rather than a fixed pipeline, replayable signed bundles instead of plain logs, a cross-repo precedent ledger, and a structured evidence graph as the primary output.
-
-## CodeAgora
-
-A debate-style code review pipeline organized as a roundtable of generic LLM agents.
-
-**What it does:** Multiple agents take turns critiquing and defending a patch; a moderator summarizes.
-
-**Counterfactual Court delta:** Roles are matched to specific Gemma 4 variants by capability rather than identical generic agents; the Jury reads the entire repository at HEAD inside a 128k window rather than summarizing; outputs are signed and replayable; precedent is reused across PRs.
-
-## diffray
-
-A diff-aware reviewer that focuses on producing concise, targeted feedback per hunk.
-
-**What it does:** Per-hunk inline review using a single model with structured prompts.
-
-**Counterfactual Court delta:** Multi-agent adversarial structure rather than single-shot; 128k Jury reasons about cross-file ripple effects rather than per-hunk; output is a structured evidence graph with cited prior verdicts rather than inline comments; bundles replay offline.
-
-## Generic LangGraph debate pipelines
-
-Reference implementations using LangGraph nodes to wire prosecution, defense, and judge roles around hosted models.
-
-**What they do:** Prove the pattern. Useful didactically.
-
-**Counterfactual Court delta:** Local-first; no hosted SDKs; specific Gemma 4 variant per role; replayable bundles; precedent ledger; UCB bandit budget rather than fixed pipeline; benchmark-backed claims via MaliciousPatch-Bench.
-
-## CodeRabbit
-
-https://coderabbit.ai
-
-Hosted AI reviewer. The December 2025 _State of AI vs Human Code Generation Report_ (https://coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) provided the failure-pattern taxonomy that seeds MaliciousPatch-Bench.
-
-**What it does:** High-quality inline reviews via hosted models.
-
-**Counterfactual Court delta:** Local-first and offline-capable; no data leaves the developer's machine; replayable bundles let auditors reproduce a review on Wi-Fi off; cross-PR precedent across repositories; structured evidence graph for downstream agent use.
-
-## GreptileAI
-
-https://greptile.com
-
-Hosted AI reviewer with a strong codebase-context story.
-
-**What it does:** Indexes the whole repo and provides PR comments grounded in that context.
-
-**Counterfactual Court delta:** Local-first; the 128k Jury holds repo HEAD inline rather than retrieving slices; no hosted indexer; signed replayable bundles; no data leaves the user's machine.
-
----
+| Feature                                              | Swarm Orchestrator [src](https://github.com/moonrunnerkc/swarm-orchestrator)   | CodeAgora [src](https://github.com/bssm-oss/CodeAgora)                                                       | diffray [src](https://github.com/strelov1/diffray)     | LangGraph review pipelines [src](https://github.com/langchain-ai/langgraph)                                      | CodeRabbit [docs](https://coderabbit.ai)                                                                                     | Counterfactual Court delta                                                                                                                                                                                                                                    |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Adversarial debate                                   | Yes. Fixed battery of critics plus a final reconciler, per the project README. | Yes. The repo description ("Code review, but with 5 models arguing first.") describes a debating roundtable. | No. The README describes a single-shot per-diff CLI.   | Yes when wired that way. The framework is generic; debate is one of many graphs the user can build.              | No. CodeRabbit ships a single hosted reviewer, not a debate.                                                                 | Roles are pinned to specific Gemma 4 variants by capability (Prosecutor e4b, Defender e4b with a different prompt and seed, Court Reporter e4b multimodal, Jury 31B 128k). The Jury is the only agent that sees the whole repo.                               |
+| Precedent reuse across PRs                           | No. Each run is independent per the README.                                    | No. Roundtable state is per-PR per the README.                                                               | No. CLI per-diff per the README.                       | No native primitive. Users would build a memory store themselves.                                                | The hosted product retains learnings inside an account; cross-repo reuse is a hosted feature, not an artifact the user owns. | Local content-addressed ledger at `~/.gemmacourt/ledger/`. The Jury queries it before deliberation, cites prior verdicts above a tunable cosine threshold, and must justify every cited precedent inside the evidence graph.                                  |
+| Structured evidence graph                            | No. Output is a transcript and a final summary per the README.                 | No. Output is debate transcript plus moderator summary per the README.                                       | No. Output is inline-style review text per the README. | Possible. The framework lets you emit any state object; no shipped review pipeline emits a typed evidence graph. | No. Output is inline PR comments per CodeRabbit's product page.                                                              | Typed nodes (exhibit, citation, test-case, precedent, verdict) and typed edges (supports, refutes, depends-on). The opinion is generated FROM the graph, not the other way around. The graph is checked into the bundle as JSON.                              |
+| Dynamic compute budget                               | Fixed pipeline per the README.                                                 | Fixed turn order per the README.                                                                             | Single shot per the README.                            | Conditional edges exist; no shipped review pipeline does multi-arm bandit allocation.                            | Hosted; budget is a billing concept, not an exposed mechanic.                                                                | UCB1 over three arms (`prosecution-rollout`, `defense-rebuttal`, `jury-round`) with a reward derived from evidence-graph node delta plus jury-confidence delta (ADR-003). Each arm pull is logged into the bundle so a replay reconstructs the full schedule. |
+| Monorepo impact tracing                              | Not described in the README.                                                   | Not described in the README.                                                                                 | Per-hunk only per the README.                          | Possible by hand. No shipped review pipeline ships an import-graph trace.                                        | [Prompt-only mention](https://docs.coderabbit.ai/) of "context-aware reviews" in the docs; no public ripple-set artifact.    | TS Compiler API extracts an import + re-export graph for the patched files, surfaces the ripple set to the Jury, and emits a `monorepo:<path>` citation node per ripple file. Tests assert every ripple file is cited.                                        |
+| Multimodal exhibits (images, diagrams, video frames) | Not described in the README.                                                   | Not described in the README.                                                                                 | Not described in the README.                           | Possible by hand. Vision is a node-level concern.                                                                | Vision-tier is a hosted-pricing feature; no client-side exhibit graph.                                                       | The Court Reporter runs on Gemma 4 e4b's native vision. It extracts Mermaid diagrams from PR descriptions, samples N frames from video attachments via ffmpeg, and emits a divergence exhibit when the diagram and the patch disagree.                        |
+| Signed, replayable verdict bundles                   | No. Logs only per the README.                                                  | No. Transcript only per the README.                                                                          | No. CLI output per the README.                         | No native primitive; the framework gives state, not a signed artifact.                                           | No. Inline comments are the artifact.                                                                                        | Every run writes a signed `.verdict` bundle. `gemmacourt replay <bundle>` re-runs the agents bit-identical (within documented quantized tolerance, see `docs/runtime-variance.md`); `gemmacourt verify` checks the Ed25519 signature without an LLM call.     |
 
 ## How the deltas combine
 
-Any single delta is matchable by a sufficiently determined competitor. The combination is not, in the contest window:
+A determined competitor can match any one delta in a sprint. The combination is the moat:
 
-- Replay + signed bundles → an auditable artifact, not a chat log.
-- Replay + precedent ledger → reused, citable judicial memory across PRs and repos.
-- Evidence graph + monorepo tracing → machine-queryable cross-file reasoning.
-- Capability-matched variants + UCB budget → every Gemma 4 model used for the job it is best at, with compute allocated to where it pays off.
+1. Replay plus signed bundles produce an auditable artifact. A verdict that is not reproducible cannot be cited.
+2. Replay plus precedent ledger produce judicial memory. The second PR knows what the first PR concluded, and the citation points back to a bundle anyone can re-run.
+3. Evidence graph plus monorepo tracing produce machine-queryable cross-file reasoning. Downstream agents can ask "which exhibits cite this file" without parsing prose.
+4. Capability-matched variants plus UCB budget produce Gemma 4 used for the job each variant is built for, with extra rollouts allocated where they pay off in graph nodes and confidence shifts.
 
-The deltas are not independent claims; they reinforce each other.
+Any single row is matchable. The combined seven rows are what the contest pitch trades on.
+
+## Source acknowledgements
+
+CodeRabbit's December 2025 _State of AI vs Human Code Generation Report_ ([link](https://coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report)) seeded the failure-pattern taxonomy used by `bench/MaliciousPatch-Bench`. The five categories (logic errors, security vulnerabilities, test weakening, prompt-injection comments, license laundering) are derived from that report and from the published reproduction patterns in the OpenAI Evals + bigcodebench corpora.
+
+## Greptile
+
+[Greptile](https://greptile.com) is omitted from the table because the public documentation describes a different shape (hosted whole-repo retrieval indexer plus a single reviewer agent) that does not map onto the rows above. The relevant delta against Greptile is the same as the delta against CodeRabbit: local-first, no hosted indexer, signed replayable bundles. Greptile's strength (whole-repo grounding) is matched here by the 31B Jury holding the repo at HEAD inside a 128k context window without retrieval.

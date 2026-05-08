@@ -11,7 +11,19 @@ coverage/
 .vitest/
 
 # Generated bundles (per CLAUDE.md: gitignored, conceptually append-only)
-bundles/
+bundles/*
+!bundles/showcase/
+bundles/showcase/*
+!bundles/showcase/.gitkeep
+
+# Generated showcase fixture (built by bin/run-showcase.sh from the live PR)
+fixtures/showcase-vite-rsc/
+
+# Phase 3 link-check log (regenerated each release rehearsal)
+PRIOR_ART_LINK_CHECK.txt
+
+# Marketing posts: drafts only; never pushed to the public repo.
+content/
 
 # Environment
 .env

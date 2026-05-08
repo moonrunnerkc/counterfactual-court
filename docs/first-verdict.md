@@ -5,7 +5,7 @@ The first end-to-end run of Counterfactual Court against a real, public OSS Type
 ## Target PR
 
 - **Repository:** [`colinhacks/zod`](https://github.com/colinhacks/zod)
-- **PR:** [#5945 — `fix(v4): cidrv6 JSON schema pattern matches runtime`](https://github.com/colinhacks/zod/pull/5945)
+- **PR:** [#5945: `fix(v4): cidrv6 JSON schema pattern matches runtime`](https://github.com/colinhacks/zod/pull/5945)
 - **Base SHA:** `1fb56a5c18c27102dbc92260a4007c7732a0ccca`
 - **Head SHA:** `45710f029e668b9daa8dd192f1a198c7428f0e5b`
 - **Merge commit:** `f29f2a6db443284eff44db181dbe146df98f92c2`
@@ -35,7 +35,7 @@ pnpm gemmacourt run --fixture zod-5945-cidrv6
 | -------------- | ------------------------- | ------------ | ------------: | ----------------: |
 | Prosecutor     | `gemma4:e4b-it-q8_0`      | `1191238005` |         6,084 |             2,561 |
 | Defender       | `gemma4:26b-a4b-it-q8_0`  | `1923793293` |         2,561 |             1,449 |
-| Court Reporter | (skipped, no attachments) | —            |             — |                 — |
+| Court Reporter | (skipped, no attachments) | (n/a)        |         (n/a) |             (n/a) |
 | Jury           | `gemma4:31b-it-q8_0`      | `990525511`  |         9,904 |             1,623 |
 
 Every model digest is the one pinned in `runtime.lock.json` (Ollama 0.23.1, Node 24.15.0).
