@@ -1,0 +1,31 @@
+From f41323d8dffe3ff8f158845464601b7f41552209 Mon Sep 17 00:00:00 2001
+From: Nate Prewitt <nate.prewitt@gmail.com>
+Date: Thu, 23 Apr 2026 21:42:15 -0600
+Subject: [PATCH] Create groups for GHA and pre-commit dependabot PRs
+
+---
+ .github/dependabot.yml | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/.github/dependabot.yml b/.github/dependabot.yml
+index 07380dae49..7b945ada2d 100644
+--- a/.github/dependabot.yml
++++ b/.github/dependabot.yml
+@@ -11,9 +11,17 @@ updates:
+         update-types: ["version-update:semver-patch"]
+     cooldown:
+       default-days: 7
++    groups:
++      actions:
++        patterns:
++          - "*"
+   - package-ecosystem: "pre-commit"
+     directory: "/"
+     schedule:
+       interval: "weekly"
+     cooldown:
+       default-days: 7
++    groups:
++      pre-commit:
++        patterns:
++          - "*"

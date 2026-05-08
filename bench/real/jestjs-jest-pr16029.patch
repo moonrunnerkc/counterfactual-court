@@ -1,0 +1,81 @@
+From 9d5084c1f05c55e6652c40dfd316d669ef4948b1 Mon Sep 17 00:00:00 2001
+From: Gdhanush_13 <dhanushdhanu1300@gmail.com>
+Date: Fri, 3 Apr 2026 14:47:44 +0530
+Subject: [PATCH 1/2] fix(fake-timers): convert Date to milliseconds before
+ passing to @sinonjs/fake-timers
+
+Since @sinonjs/fake-timers@15.3.0, setSystemTime() only accepts
+milliseconds (number), not Date objects. Jest's setSystemTime() API
+accepts both number and Date, so we need to convert Date to
+milliseconds via .getTime() before forwarding to the underlying
+clock.
+
+Also fixes the same issue in _toSinonFakeTimersConfig() where
+the config 'now' option (which can be a Date) is passed directly.
+
+Closes #16028
+---
+ .../src/__tests__/sinon-integration.test.ts                | 2 +-
+ packages/jest-fake-timers/src/modernFakeTimers.ts          | 7 +++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/packages/jest-fake-timers/src/__tests__/sinon-integration.test.ts b/packages/jest-fake-timers/src/__tests__/sinon-integration.test.ts
+index 8e06e211c968..7be97c691a4c 100644
+--- a/packages/jest-fake-timers/src/__tests__/sinon-integration.test.ts
++++ b/packages/jest-fake-timers/src/__tests__/sinon-integration.test.ts
+@@ -128,7 +128,7 @@ describe('`@sinonjs/fake-timers` integration', () => {
+     expect(mockInstall).toHaveBeenCalledWith({
+       advanceTimeDelta: 40,
+       loopLimit: 2000,
+-      now: new Date('1995-12-17'),
++      now: new Date('1995-12-17').getTime(),
+       shouldAdvanceTime: true,
+       shouldClearNativeTimers: true,
+       toFake: [
+diff --git a/packages/jest-fake-timers/src/modernFakeTimers.ts b/packages/jest-fake-timers/src/modernFakeTimers.ts
+index 51d7fe259957..dc2614d39a79 100644
+--- a/packages/jest-fake-timers/src/modernFakeTimers.ts
++++ b/packages/jest-fake-timers/src/modernFakeTimers.ts
+@@ -152,7 +152,7 @@ export default class FakeTimers {
+ 
+   setSystemTime(now?: number | Date): void {
+     if (this._checkFakeTimers()) {
+-      this._clock.setSystemTime(now);
++      this._clock.setSystemTime(now instanceof Date ? now.getTime() : now);
+     }
+   }
+ 
+@@ -227,7 +227,10 @@ export default class FakeTimers {
+     return {
+       advanceTimeDelta,
+       loopLimit: fakeTimersConfig.timerLimit || 100_000,
+-      now: fakeTimersConfig.now ?? Date.now(),
++      now:
++        fakeTimersConfig.now instanceof Date
++          ? fakeTimersConfig.now.getTime()
++          : (fakeTimersConfig.now ?? Date.now()),
+       shouldAdvanceTime: Boolean(fakeTimersConfig.advanceTimers),
+       shouldClearNativeTimers: true,
+       toFake: [...toFake],
+
+From a4be3cb9fa7b550814dc13bbbb064bbc7cdb2119 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Fri, 1 May 2026 14:26:06 +0200
+Subject: [PATCH 2/2] changelog
+
+---
+ CHANGELOG.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 3dc9707c6a0a..3dcfef54e951 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -10,6 +10,7 @@
+ ### Fixes
+ 
+ - `[expect-utils]` Fix `toStrictEqual` failing on `structuredClone` results due to cross-realm constructor mismatch ([#14011](https://github.com/jestjs/jest/issues/14011))
++- `[fake-timers)]` Convert `Date` to milliseconds before passing to `@sinonjs/fake-timers` ([#16029](https://github.com/jestjs/jest/pull/16029))
+ - `[jest-runtime]` Improve CJS-from-ESM interop: `__esModule`/Babel default unwrap, broader named-export coverage, and shared CJS singleton across importers ([#16050](https://github.com/jestjs/jest/pull/16050))
+ - `[jest-runtime]` Load `.js` files with ESM syntax but no `"type":"module"` marker as native ESM ([#16050](https://github.com/jestjs/jest/pull/16050))
+ - `[jest-runtime]` Fix deadlocks and double-evaluation in concurrent ESM and wasm imports ([#16050](https://github.com/jestjs/jest/pull/16050))

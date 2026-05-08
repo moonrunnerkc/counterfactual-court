@@ -1,0 +1,199 @@
+From 7c3fa8d0d5cf81559a019be67176922c4de0e2fc Mon Sep 17 00:00:00 2001
+From: LitoMore <litomore@gmail.com>
+Date: Tue, 4 Oct 2022 04:43:11 +0800
+Subject: [PATCH 1/6] Expose styles as variables
+
+---
+ source/index.d.ts | 4 ++++
+ source/index.js   | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/source/index.d.ts b/source/index.d.ts
+index c840202d..eceb90e3 100644
+--- a/source/index.d.ts
++++ b/source/index.d.ts
+@@ -284,4 +284,8 @@ export {
+ // } from '#supports-color';
+ } from './vendor/supports-color/index.js';
+ 
++export const modifiers: Modifiers[];
++export const foregroundColors: ForegroundColor[];
++export const backgroundColors: BackgroundColor[];
++
+ export default chalk;
+diff --git a/source/index.js b/source/index.js
+index 302024b6..e78bea79 100644
+--- a/source/index.js
++++ b/source/index.js
+@@ -209,4 +209,8 @@ export {
+ 	stderrColor as supportsColorStderr,
+ };
+ 
++export const modifiers = Object.keys(ansiStyles.modifier);
++export const foregroundColors = Object.keys(ansiStyles.color);
++export const backgroundColors = Object.keys(ansiStyles.bgColor);
++
+ export default chalk;
+
+From 195f7baad71db55d40f190f7516106dc1b817805 Mon Sep 17 00:00:00 2001
+From: LitoMore <litomore@gmail.com>
+Date: Tue, 4 Oct 2022 13:31:53 +0800
+Subject: [PATCH 2/6] Updates
+
+---
+ readme.md         | 4 ++++
+ source/index.d.ts | 7 ++++---
+ source/index.js   | 1 +
+ 3 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/readme.md b/readme.md
+index 2f41876a..6caba7e0 100644
+--- a/readme.md
++++ b/readme.md
+@@ -201,6 +201,10 @@ Explicit 256/Truecolor mode can be enabled using the `--color=256` and `--color=
+ 
+ `chalkStderr` contains a separate instance configured with color support detected for `stderr` stream instead of `stdout`. Override rules from `supportsColor` apply to this too. `supportsColorStderr` is exposed for convenience.
+ 
++### modifiers, foregroundColors, backgroundColors and colors
++
++All supported style strings are exposed for convenience. `colors` is the combination of `foregroundColors` and `backgroundColors`.
++
+ ## Styles
+ 
+ ### Modifiers
+diff --git a/source/index.d.ts b/source/index.d.ts
+index eceb90e3..b0acc0f5 100644
+--- a/source/index.d.ts
++++ b/source/index.d.ts
+@@ -284,8 +284,9 @@ export {
+ // } from '#supports-color';
+ } from './vendor/supports-color/index.js';
+ 
+-export const modifiers: Modifiers[];
+-export const foregroundColors: ForegroundColor[];
+-export const backgroundColors: BackgroundColor[];
++export const modifiers: readonly Modifiers[];
++export const foregroundColors: readonly ForegroundColor[];
++export const backgroundColors: readonly BackgroundColor[];
++export const colors: readonly Color[];
+ 
+ export default chalk;
+diff --git a/source/index.js b/source/index.js
+index e78bea79..340eb10d 100644
+--- a/source/index.js
++++ b/source/index.js
+@@ -212,5 +212,6 @@ export {
+ export const modifiers = Object.keys(ansiStyles.modifier);
+ export const foregroundColors = Object.keys(ansiStyles.color);
+ export const backgroundColors = Object.keys(ansiStyles.bgColor);
++export const colors = [...foregroundColors, ...backgroundColors];
+ 
+ export default chalk;
+
+From ce83259e4b86550649c473fcd99c5b5b64ef6dc4 Mon Sep 17 00:00:00 2001
+From: Sindre Sorhus <sindresorhus@gmail.com>
+Date: Tue, 4 Oct 2022 19:04:51 +0700
+Subject: [PATCH 3/6] Update readme.md
+
+---
+ readme.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/readme.md b/readme.md
+index 6caba7e0..a9a3f56e 100644
+--- a/readme.md
++++ b/readme.md
+@@ -201,7 +201,7 @@ Explicit 256/Truecolor mode can be enabled using the `--color=256` and `--color=
+ 
+ `chalkStderr` contains a separate instance configured with color support detected for `stderr` stream instead of `stdout`. Override rules from `supportsColor` apply to this too. `supportsColorStderr` is exposed for convenience.
+ 
+-### modifiers, foregroundColors, backgroundColors and colors
++### modifiers, foregroundColors, backgroundColors, and colors
+ 
+ All supported style strings are exposed for convenience. `colors` is the combination of `foregroundColors` and `backgroundColors`.
+ 
+
+From 355d134ca077363befcb87463c8d038a23b83a4f Mon Sep 17 00:00:00 2001
+From: LitoMore <litomore@gmail.com>
+Date: Tue, 4 Oct 2022 20:23:01 +0800
+Subject: [PATCH 4/6] Add example code
+
+---
+ readme.md | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/readme.md b/readme.md
+index a9a3f56e..320f0365 100644
+--- a/readme.md
++++ b/readme.md
+@@ -205,6 +205,15 @@ Explicit 256/Truecolor mode can be enabled using the `--color=256` and `--color=
+ 
+ All supported style strings are exposed for convenience. `colors` is the combination of `foregroundColors` and `backgroundColors`.
+ 
++This is useful when checking if a style string is supported:
++
++```js
++import {foregroundColors} from 'chalk';
++
++console.log(foregroundColors.includes('pink'));
++//=> false
++```
++
+ ## Styles
+ 
+ ### Modifiers
+
+From 6444e365c0e9ab32674d0f42d2a473267225d3e7 Mon Sep 17 00:00:00 2001
+From: LitoMore <litomore@gmail.com>
+Date: Tue, 4 Oct 2022 20:29:26 +0800
+Subject: [PATCH 5/6] Updates
+
+---
+ readme.md | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/readme.md b/readme.md
+index 320f0365..4cfd4b27 100644
+--- a/readme.md
++++ b/readme.md
+@@ -203,12 +203,15 @@ Explicit 256/Truecolor mode can be enabled using the `--color=256` and `--color=
+ 
+ ### modifiers, foregroundColors, backgroundColors, and colors
+ 
+-All supported style strings are exposed for convenience. `colors` is the combination of `foregroundColors` and `backgroundColors`.
++All supported style strings are exposed as an array of strings for convenience. `colors` is the combination of `foregroundColors` and `backgroundColors`.
+ 
+ This is useful when checking if a style string is supported:
+ 
+ ```js
+-import {foregroundColors} from 'chalk';
++import {modifiers, foregroundColors} from 'chalk';
++
++console.log(modifiers.includes('bold'));
++//=> true
+ 
+ console.log(foregroundColors.includes('pink'));
+ //=> false
+
+From 61a76a60d93663890f5e7ec12d31b7074e52896e Mon Sep 17 00:00:00 2001
+From: Sindre Sorhus <sindresorhus@gmail.com>
+Date: Tue, 4 Oct 2022 20:26:21 +0700
+Subject: [PATCH 6/6] Update readme.md
+
+---
+ readme.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/readme.md b/readme.md
+index 4cfd4b27..171754ef 100644
+--- a/readme.md
++++ b/readme.md
+@@ -205,7 +205,7 @@ Explicit 256/Truecolor mode can be enabled using the `--color=256` and `--color=
+ 
+ All supported style strings are exposed as an array of strings for convenience. `colors` is the combination of `foregroundColors` and `backgroundColors`.
+ 
+-This is useful when checking if a style string is supported:
++This can be useful if you wrap Chalk and need to validate input:
+ 
+ ```js
+ import {modifiers, foregroundColors} from 'chalk';

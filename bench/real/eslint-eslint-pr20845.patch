@@ -1,0 +1,31 @@
+From 466e56b56124de3b5bc684327a3d6c33b510382d Mon Sep 17 00:00:00 2001
+From: Francesco Trotta <github@fasttime.org>
+Date: Wed, 6 May 2026 23:50:18 +0200
+Subject: [PATCH] test: suppress warning for
+ `vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER`
+
+---
+ tests/lib/config/config-loader.js | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/tests/lib/config/config-loader.js b/tests/lib/config/config-loader.js
+index 4855e6c8223a..563aafc2fb23 100644
+--- a/tests/lib/config/config-loader.js
++++ b/tests/lib/config/config-loader.js
+@@ -88,6 +88,16 @@ describe("ConfigLoader", () => {
+ 
+ 				requireWithoutCache.cache = void 0;
+ 
++				// Do not warn about usage of experimental `vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER`.
++				const emitStub = sinon.stub(process, "emit");
++				emitStub
++					.withArgs(
++						"warning",
++						sinon.match({ name: "ExperimentalWarning" }),
++					)
++					.returns();
++				emitStub.callThrough();
++
+ 				const compiledWrapper = vm.runInThisContext(
+ 					Module.wrap(configLoaderSource),
+ 					{

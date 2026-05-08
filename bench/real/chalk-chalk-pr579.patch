@@ -1,0 +1,278 @@
+From 75ace79cc7d667c765e71287f7cef77873390940 Mon Sep 17 00:00:00 2001
+From: idanran <idanran@outlook.com>
+Date: Wed, 7 Dec 2022 20:32:31 +0800
+Subject: [PATCH 1/5] update supports-color
+
+---
+ source/vendor/supports-color/browser.js | 27 +++++++++++++++++--------
+ source/vendor/supports-color/index.d.ts |  2 +-
+ source/vendor/supports-color/index.js   | 26 +++++++++++++-----------
+ 3 files changed, 34 insertions(+), 21 deletions(-)
+
+diff --git a/source/vendor/supports-color/browser.js b/source/vendor/supports-color/browser.js
+index 4e75e86d..1ffde642 100644
+--- a/source/vendor/supports-color/browser.js
++++ b/source/vendor/supports-color/browser.js
+@@ -1,15 +1,26 @@
+ /* eslint-env browser */
+ 
+-const isBlinkBasedBrowser = navigator.userAgentData
+-	? navigator.userAgentData.brands.some(({brand}) => brand === 'Chromium')
+-	: /\b(Chrome|Chromium)\//.test(navigator.userAgent);
++const level = (() => {
++	if (navigator.userAgentData) {
++		const brand = navigator.userAgentData.brands.find(({brand}) => brand === 'Chromium');
++		if (brand?.version > 93) {
++			return 3;
++		}
++	}
+ 
+-const colorSupport = isBlinkBasedBrowser ? {
+-	level: 1,
++	if (/\b(Chrome|Chromium)\//.test(navigator.userAgent)) {
++		return 1;
++	}
++
++	return 0;
++})();
++
++const colorSupport = level !== 0 && {
++	level,
+ 	hasBasic: true,
+-	has256: false,
+-	has16m: false,
+-} : false;
++	has256: level >= 2,
++	has16m: level >= 3,
++};
+ 
+ const supportsColor = {
+ 	stdout: colorSupport,
+diff --git a/source/vendor/supports-color/index.d.ts b/source/vendor/supports-color/index.d.ts
+index 98e36187..58faab64 100644
+--- a/source/vendor/supports-color/index.d.ts
++++ b/source/vendor/supports-color/index.d.ts
+@@ -45,7 +45,7 @@ export interface ColorSupport {
+ 
+ export type ColorInfo = ColorSupport | false;
+ 
+-export function createSupportsColor(stream: WriteStream, options?: Options): ColorInfo;
++export function createSupportsColor(stream?: WriteStream, options?: Options): ColorInfo;
+ 
+ declare const supportsColor: {
+ 	stdout: ColorInfo;
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index 130c8b92..0a05acf1 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -3,7 +3,7 @@ import os from 'node:os';
+ import tty from 'node:tty';
+ 
+ // From: https://github.com/sindresorhus/has-flag/blob/main/index.js
+-function hasFlag(flag, argv = process.argv) {
++function hasFlag(flag, argv = globalThis.Deno?.args ?? process.argv) {
+ 	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+ 	const position = argv.indexOf(prefix + flag);
+ 	const terminatorPosition = argv.indexOf('--');
+@@ -80,6 +80,12 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		}
+ 	}
+ 
++	// Check for Azure DevOps pipelines.
++	// Has to be above the `!streamIsTTY` check.
++	if ('TF_BUILD' in env && 'AGENT_NAME' in env) {
++		return 1;
++	}
++
+ 	if (haveStream && !streamIsTTY && forceColor === undefined) {
+ 		return 0;
+ 	}
+@@ -105,7 +111,11 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 	}
+ 
+ 	if ('CI' in env) {
+-		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'GITHUB_ACTIONS', 'BUILDKITE', 'DRONE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
++		if ('GITHUB_ACTIONS' in env) {
++			return 3;
++		}
++
++		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'BUILDKITE', 'DRONE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+ 			return 1;
+ 		}
+ 
+@@ -116,11 +126,6 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+ 	}
+ 
+-	// Check for Azure DevOps pipelines
+-	if ('TF_BUILD' in env && 'AGENT_NAME' in env) {
+-		return 1;
+-	}
+-
+ 	if (env.COLORTERM === 'truecolor') {
+ 		return 3;
+ 	}
+@@ -129,13 +134,10 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+ 
+ 		switch (env.TERM_PROGRAM) {
+-			case 'iTerm.app': {
++			case 'iTerm.app':
+ 				return version >= 3 ? 3 : 2;
+-			}
+-
+-			case 'Apple_Terminal': {
++			case 'Apple_Terminal':
+ 				return 2;
+-			}
+ 			// No default
+ 		}
+ 	}
+
+From 45bdd52392af64faceb8c546ef1903185435021f Mon Sep 17 00:00:00 2001
+From: idanran <idanran@outlook.com>
+Date: Wed, 7 Dec 2022 20:35:03 +0800
+Subject: [PATCH 2/5] update
+
+---
+ source/vendor/supports-color/index.js | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index 0a05acf1..68f2bf28 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -130,6 +130,10 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		return 3;
+ 	}
+ 
++	if (env.TERM === 'xterm-kitty') {
++		return 3;
++	}
++
+ 	if ('TERM_PROGRAM' in env) {
+ 		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+ 
+
+From 4f407d4440d3080fbe352d84984e1bb3d13d8566 Mon Sep 17 00:00:00 2001
+From: idanran <idanran@outlook.com>
+Date: Wed, 7 Dec 2022 21:36:24 +0800
+Subject: [PATCH 3/5] Update index.js
+
+---
+ source/vendor/supports-color/index.js | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index 68f2bf28..0ff0fb6e 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -138,10 +138,12 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+ 
+ 		switch (env.TERM_PROGRAM) {
+-			case 'iTerm.app':
++			case 'iTerm.app': {
+ 				return version >= 3 ? 3 : 2;
+-			case 'Apple_Terminal':
++			}
++			case 'Apple_Terminal': {
+ 				return 2;
++			}
+ 			// No default
+ 		}
+ 	}
+
+From e370d012853cad3ad5f84e5f351cdffafa5a2b09 Mon Sep 17 00:00:00 2001
+From: idanran <idanran@outlook.com>
+Date: Wed, 7 Dec 2022 21:45:07 +0800
+Subject: [PATCH 4/5] update
+
+---
+ source/vendor/supports-color/browser.js | 2 +-
+ source/vendor/supports-color/index.js   | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/source/vendor/supports-color/browser.js b/source/vendor/supports-color/browser.js
+index 1ffde642..9fa6888f 100644
+--- a/source/vendor/supports-color/browser.js
++++ b/source/vendor/supports-color/browser.js
+@@ -3,7 +3,7 @@
+ const level = (() => {
+ 	if (navigator.userAgentData) {
+ 		const brand = navigator.userAgentData.brands.find(({brand}) => brand === 'Chromium');
+-		if (brand?.version > 93) {
++		if (brand && brand.version > 93) {
+ 			return 3;
+ 		}
+ 	}
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index 0ff0fb6e..a7cea61e 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -3,7 +3,7 @@ import os from 'node:os';
+ import tty from 'node:tty';
+ 
+ // From: https://github.com/sindresorhus/has-flag/blob/main/index.js
+-function hasFlag(flag, argv = globalThis.Deno?.args ?? process.argv) {
++function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process.argv) {
+ 	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+ 	const position = argv.indexOf(prefix + flag);
+ 	const terminatorPosition = argv.indexOf('--');
+@@ -141,6 +141,7 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 			case 'iTerm.app': {
+ 				return version >= 3 ? 3 : 2;
+ 			}
++
+ 			case 'Apple_Terminal': {
+ 				return 2;
+ 			}
+
+From caece8bea908a0560d8baa7fdc4530ba3aab5434 Mon Sep 17 00:00:00 2001
+From: idanran <idanran@outlook.com>
+Date: Wed, 7 Dec 2022 22:12:19 +0800
+Subject: [PATCH 5/5] Update index.d.ts
+
+---
+ source/vendor/supports-color/index.d.ts | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/source/vendor/supports-color/index.d.ts b/source/vendor/supports-color/index.d.ts
+index 58faab64..db44a785 100644
+--- a/source/vendor/supports-color/index.d.ts
++++ b/source/vendor/supports-color/index.d.ts
+@@ -1,13 +1,13 @@
+-import {WriteStream} from 'node:tty';
++import type {WriteStream} from 'node:tty';
+ 
+-export interface Options {
++export type Options = {
+ 	/**
+ 	Whether `process.argv` should be sniffed for `--color` and `--no-color` flags.
+ 
+ 	@default true
+ 	*/
+ 	readonly sniffFlags?: boolean;
+-}
++};
+ 
+ /**
+ Levels:
+@@ -21,7 +21,7 @@ export type ColorSupportLevel = 0 | 1 | 2 | 3;
+ /**
+ Detect whether the terminal supports color.
+ */
+-export interface ColorSupport {
++export type ColorSupport = {
+ 	/**
+ 	The color level.
+ 	*/
+@@ -41,7 +41,7 @@ export interface ColorSupport {
+ 	Whether Truecolor 16 million colors are supported.
+ 	*/
+ 	has16m: boolean;
+-}
++};
+ 
+ export type ColorInfo = ColorSupport | false;
+ 

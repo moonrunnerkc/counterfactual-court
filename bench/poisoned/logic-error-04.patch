@@ -1,0 +1,647 @@
+From caf309eb1da199cb02e0624825c734feabbc75b8 Mon Sep 17 00:00:00 2001
+From: "DESKTOP-LF576SH\\micha" <m.hughes@shaw.ca>
+Date: Tue, 3 Feb 2026 10:34:49 -0700
+Subject: [PATCH 1/7] fix(expect-utils): avoid throwing from iterableEquality
+ on exotic iterables
+
+---
+ .../expect-utils/src/__tests__/utils.test.ts  |   9 +
+ packages/expect-utils/src/utils.ts            | 168 +++++++++---------
+ 2 files changed, 93 insertions(+), 84 deletions(-)
+
+diff --git a/packages/expect-utils/src/__tests__/utils.test.ts b/packages/expect-utils/src/__tests__/utils.test.ts
+index 336f762f690f..6315f6e31ba0 100644
+--- a/packages/expect-utils/src/__tests__/utils.test.ts
++++ b/packages/expect-utils/src/__tests__/utils.test.ts
+@@ -652,6 +652,15 @@ describe('iterableEquality', () => {
+ 
+     expect(iterableEquality(a, b)).toBe(false);
+   });
++
++  test('does not throw when iterating an object with a TypedArray iterator', () => {
++    const badIterable = {
++      [Symbol.iterator]: Uint8Array.prototype[Symbol.iterator],
++    };
++
++    expect(() => iterableEquality(badIterable, badIterable)).not.toThrow();
++    expect(iterableEquality(badIterable, badIterable)).toBe(false);
++  });
+ });
+ 
+ describe('typeEquality', () => {
+diff --git a/packages/expect-utils/src/utils.ts b/packages/expect-utils/src/utils.ts
+index 5a647281f630..0c06b5eac0d8 100644
+--- a/packages/expect-utils/src/utils.ts
++++ b/packages/expect-utils/src/utils.ts
+@@ -208,120 +208,120 @@ export const iterableEquality = (
+   aStack.push(a);
+   bStack.push(b);
+ 
+-  const iterableEqualityWithStack = (a: any, b: any) =>
++  // Replace any instance of iterableEquality with the new iterableEqualityWithStack
++  // so we can do circular detection.
++  const iterableEqualityWithStack = (aInner: any, bInner: any) =>
+     iterableEquality(
+-      a,
+-      b,
++      aInner,
++      bInner,
+       [...filteredCustomTesters],
+       [...aStack],
+       [...bStack],
+     );
+ 
+-  // Replace any instance of iterableEquality with the new
+-  // iterableEqualityWithStack so we can do circular detection
+   const filteredCustomTesters: Array<Tester> = [
+     ...customTesters.filter(t => t !== iterableEquality),
+     iterableEqualityWithStack,
+   ];
+ 
+-  if (a.size !== undefined) {
+-    if (a.size !== b.size) {
+-      return false;
+-    } else if (isA<Set<unknown>>('Set', a) || isImmutableUnorderedSet(a)) {
+-      let allFound = true;
+-      for (const aValue of a) {
+-        if (!b.has(aValue)) {
+-          let has = false;
+-          for (const bValue of b) {
+-            const isEqual = equals(aValue, bValue, filteredCustomTesters);
+-            if (isEqual === true) {
+-              has = true;
++  try {
++    if (a.size !== undefined) {
++      if (a.size !== b.size) {
++        return false;
++      } else if (isA<Set<unknown>>('Set', a) || isImmutableUnorderedSet(a)) {
++        let allFound = true;
++        for (const aValue of a) {
++          if (!b.has(aValue)) {
++            let has = false;
++            for (const bValue of b) {
++              const isEqual = equals(aValue, bValue, filteredCustomTesters);
++              if (isEqual === true) {
++                has = true;
++              }
+             }
+-          }
+ 
+-          if (has === false) {
+-            allFound = false;
+-            break;
++            if (has === false) {
++              allFound = false;
++              break;
++            }
+           }
+         }
+-      }
+-      // Remove the first value from the stack of traversed values.
+-      aStack.pop();
+-      bStack.pop();
+-      return allFound;
+-    } else if (
+-      isA<Map<unknown, unknown>>('Map', a) ||
+-      isImmutableUnorderedKeyed(a)
+-    ) {
+-      let allFound = true;
+-      for (const aEntry of a) {
+-        if (
+-          !b.has(aEntry[0]) ||
+-          !equals(aEntry[1], b.get(aEntry[0]), filteredCustomTesters)
+-        ) {
+-          let has = false;
+-          for (const bEntry of b) {
+-            const matchedKey = equals(
+-              aEntry[0],
+-              bEntry[0],
+-              filteredCustomTesters,
+-            );
+-
+-            let matchedValue = false;
+-            if (matchedKey === true) {
+-              matchedValue = equals(
+-                aEntry[1],
+-                bEntry[1],
++        return allFound;
++      } else if (
++        isA<Map<unknown, unknown>>('Map', a) ||
++        isImmutableUnorderedKeyed(a)
++      ) {
++        let allFound = true;
++        for (const aEntry of a) {
++          if (
++            !b.has(aEntry[0]) ||
++            !equals(aEntry[1], b.get(aEntry[0]), filteredCustomTesters)
++          ) {
++            let has = false;
++            for (const bEntry of b) {
++              const matchedKey = equals(
++                aEntry[0],
++                bEntry[0],
+                 filteredCustomTesters,
+               );
++
++              let matchedValue = false;
++              if (matchedKey === true) {
++                matchedValue = equals(
++                  aEntry[1],
++                  bEntry[1],
++                  filteredCustomTesters,
++                );
++              }
++              if (matchedValue === true) {
++                has = true;
++              }
+             }
+-            if (matchedValue === true) {
+-              has = true;
+-            }
+-          }
+ 
+-          if (has === false) {
+-            allFound = false;
+-            break;
++            if (has === false) {
++              allFound = false;
++              break;
++            }
+           }
+         }
++        return allFound;
+       }
+-      // Remove the first value from the stack of traversed values.
+-      aStack.pop();
+-      bStack.pop();
+-      return allFound;
+     }
+-  }
+ 
+-  const bIterator = b[IteratorSymbol]();
++    const bIterator = b[IteratorSymbol]();
+ 
+-  for (const aValue of a) {
+-    const nextB = bIterator.next();
+-    if (nextB.done || !equals(aValue, nextB.value, filteredCustomTesters)) {
++    for (const aValue of a) {
++      const nextB = bIterator.next();
++      if (nextB.done || !equals(aValue, nextB.value, filteredCustomTesters)) {
++        return false;
++      }
++    }
++    if (!bIterator.next().done) {
+       return false;
+     }
+-  }
+-  if (!bIterator.next().done) {
+-    return false;
+-  }
+ 
+-  if (
+-    !isImmutableList(a) &&
+-    !isImmutableOrderedKeyed(a) &&
+-    !isImmutableOrderedSet(a) &&
+-    !isImmutableRecord(a)
+-  ) {
+-    const aEntries = entries(a);
+-    const bEntries = entries(b);
+-    if (!equals(aEntries, bEntries)) {
+-      return false;
++    if (
++      !isImmutableList(a) &&
++      !isImmutableOrderedKeyed(a) &&
++      !isImmutableOrderedSet(a) &&
++      !isImmutableRecord(a)
++    ) {
++      const aEntries = entries(a);
++      const bEntries = entries(b);
++      if (!equals(aEntries, bEntries)) {
++        return false;
++      }
+     }
+-  }
+ 
+-  // Remove the first value from the stack of traversed values.
+-  aStack.pop();
+-  bStack.pop();
+-  return true;
++    return true;
++  } catch {
++    // If an exotic iterator/getter throws (DOM objects, proxies, host objects),
++    // treat it as "not equal" rather than crashing the matcher.
++    return false;
++  } finally {
++    aStack.pop();
++    bStack.pop();
++  }
+ };
+ 
+ const entries = (obj: any) => {
+
+From 6a97e49d92e52120092ae1a4ed8d3b5319593636 Mon Sep 17 00:00:00 2001
+From: "DESKTOP-LF576SH\\micha" <m.hughes@shaw.ca>
+Date: Tue, 3 Feb 2026 10:57:03 -0700
+Subject: [PATCH 2/7] chore: add changelog entry for iterableEquality fix
+
+---
+ CHANGELOG.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 95b781a4a1b0..50ba8ee03c77 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,6 +7,7 @@
+ 
+ ### Fixes
+ 
++- `[@jest/expect-utils]` Prevent `toMatchObject`/subset matching from throwing when encountering exotic iterables (for example, objects with a TypedArray iterator) ([#14375](https://github.com/jestjs/jest/issues/14375))
+ - `[jest-mock]` Use `Symbol` from test environment ([#15858](https://github.com/jestjs/jest/pull/15858))
+ - `[jest-reporters]` Fix issue where console output not displayed for GHA reporter even with `silent: false` option ([#15864](https://github.com/jestjs/jest/pull/15864))
+ - `[jest-runtime]` Fix issue where user cannot utilize dynamic import despite specifying `--experimental-vm-modules` Node option ([#15842](https://github.com/jestjs/jest/pull/15842))
+
+From c46ebbf294e55461d076d3bd0414acaedf029d5d Mon Sep 17 00:00:00 2001
+From: "DESKTOP-LF576SH\\micha" <m.hughes@shaw.ca>
+Date: Wed, 4 Feb 2026 08:58:04 -0700
+Subject: [PATCH 3/7] Chore: Trigger CI re-run
+
+
+From c825237a044e3f59d0882a592625d78ec5897125 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 17:29:38 +0200
+Subject: [PATCH 4/7] mobile merge is hard
+
+---
+ CHANGELOG.md | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 0e099c672004..09e28ed16e08 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -16,8 +16,9 @@
+ 
+ ### Fixes
+ 
+-- `[expect-utils]` Fix `toStrictEqual` failing on `structuredClone` results due to cross-realm constructor mismatch ([#14011](https://github.com/jestjs/jest/issues/14011))- `[fake-timers]` Convert `Date` to milliseconds before passing to `@sinonjs/fake-timers` ([#16029](https://github.com/jestjs/jest/pull/16029))
+-- `[@jest/expect-utils]` Prevent `toMatchObject`/subset matching from throwing when encountering exotic iterables (for example, objects with a TypedArray iterator) ([#14375](https://github.com/jestjs/jest/issues/14375))
++- `[expect-utils]` Fix `toStrictEqual` failing on `structuredClone` results due to cross-realm constructor mismatch ([#15959](https://github.com/jestjs/jest/pull/15959))
++- `[@jest/expect-utils]` Prevent `toMatchObject`/subset matching from throwing when encountering exotic iterables (for example, objects with a TypedArray iterator) ([#15952](https://github.com/jestjs/jest/pull/15952))
++- `[fake-timers]` Convert `Date` to milliseconds before passing to `@sinonjs/fake-timers` ([#16029](https://github.com/jestjs/jest/pull/16029))
+ - `[jest-circus]` Prevent crash when `asyncError` is undefined for non-Error throws ([#16003](https://github.com/jestjs/jest/pull/16003))
+ - `[jest-circus, jest-jasmine2]` Include `Error.cause` in JSON `failureMessages` output ([#15949](https://github.com/jestjs/jest/issues/15949))
+ - `[jest-config]` Fix preset path resolution on Windows when the preset uses subpath `exports` ([#15961](https://github.com/jestjs/jest/pull/15961))
+
+From 61ed62387beb9ffe5b1aadfcf5d938e1666cf346 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 17:30:03 +0200
+Subject: [PATCH 5/7] neh
+
+---
+ CHANGELOG.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 09e28ed16e08..3007a063012e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -17,7 +17,7 @@
+ ### Fixes
+ 
+ - `[expect-utils]` Fix `toStrictEqual` failing on `structuredClone` results due to cross-realm constructor mismatch ([#15959](https://github.com/jestjs/jest/pull/15959))
+-- `[@jest/expect-utils]` Prevent `toMatchObject`/subset matching from throwing when encountering exotic iterables (for example, objects with a TypedArray iterator) ([#15952](https://github.com/jestjs/jest/pull/15952))
++- `[@jest/expect-utils]` Prevent `toMatchObject`/subset matching from throwing when encountering exotic iterables ([#15952](https://github.com/jestjs/jest/pull/15952))
+ - `[fake-timers]` Convert `Date` to milliseconds before passing to `@sinonjs/fake-timers` ([#16029](https://github.com/jestjs/jest/pull/16029))
+ - `[jest-circus]` Prevent crash when `asyncError` is undefined for non-Error throws ([#16003](https://github.com/jestjs/jest/pull/16003))
+ - `[jest-circus, jest-jasmine2]` Include `Error.cause` in JSON `failureMessages` output ([#15949](https://github.com/jestjs/jest/issues/15949))
+
+From afddeec13f7958f483ede28f63f2a7558f2a014f Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 19:52:33 +0200
+Subject: [PATCH 6/7] maybe address comments
+
+---
+ .../expect-utils/src/__tests__/utils.test.ts  |   5 +-
+ packages/expect-utils/src/utils.ts            | 181 ++++++++++--------
+ .../expect/src/__tests__/matchers.test.js     |  10 +
+ 3 files changed, 117 insertions(+), 79 deletions(-)
+
+diff --git a/packages/expect-utils/src/__tests__/utils.test.ts b/packages/expect-utils/src/__tests__/utils.test.ts
+index bff61729c9e6..ffd61e54114c 100644
+--- a/packages/expect-utils/src/__tests__/utils.test.ts
++++ b/packages/expect-utils/src/__tests__/utils.test.ts
+@@ -660,7 +660,10 @@ describe('iterableEquality', () => {
+     };
+ 
+     expect(() => iterableEquality(badIterable, badIterable)).not.toThrow();
+-    expect(iterableEquality(badIterable, badIterable)).toBe(false);
++    // Returns undefined so equals() can fall through to Object.is / property checks.
++    expect(iterableEquality(badIterable, badIterable)).toBeUndefined();
++    // Same reference must still be considered equal via equals().
++    expect(equals(badIterable, badIterable, [iterableEquality])).toBe(true);
+   });
+ });
+ 
+diff --git a/packages/expect-utils/src/utils.ts b/packages/expect-utils/src/utils.ts
+index 312e2aeee302..38f1adc12d1b 100644
+--- a/packages/expect-utils/src/utils.ts
++++ b/packages/expect-utils/src/utils.ts
+@@ -234,104 +234,129 @@ export const iterableEquality = (
+     iterableEqualityWithStack,
+   ];
+ 
+-  try {
+-    if (a.size !== undefined) {
+-      if (a.size !== b.size) {
+-        return false;
+-      } else if (isA<Set<unknown>>('Set', a) || isImmutableUnorderedSet(a)) {
+-        let allFound = true;
+-        for (const aValue of a) {
+-          if (!b.has(aValue)) {
+-            let has = false;
+-            for (const bValue of b) {
+-              const isEqual = equals(aValue, bValue, filteredCustomTesters);
+-              if (isEqual === true) {
+-                has = true;
+-              }
++  if (a.size !== undefined) {
++    if (a.size !== b.size) {
++      aStack.pop();
++      bStack.pop();
++      return false;
++    } else if (isA<Set<unknown>>('Set', a) || isImmutableUnorderedSet(a)) {
++      let allFound = true;
++      for (const aValue of a) {
++        if (!b.has(aValue)) {
++          let has = false;
++          for (const bValue of b) {
++            const isEqual = equals(aValue, bValue, filteredCustomTesters);
++            if (isEqual === true) {
++              has = true;
+             }
++          }
+ 
+-            if (has === false) {
+-              allFound = false;
+-              break;
+-            }
++          if (has === false) {
++            allFound = false;
++            break;
+           }
+         }
+-        return allFound;
+-      } else if (
+-        isA<Map<unknown, unknown>>('Map', a) ||
+-        isImmutableUnorderedKeyed(a)
+-      ) {
+-        let allFound = true;
+-        for (const aEntry of a) {
+-          if (
+-            !b.has(aEntry[0]) ||
+-            !equals(aEntry[1], b.get(aEntry[0]), filteredCustomTesters)
+-          ) {
+-            let has = false;
+-            for (const bEntry of b) {
+-              const matchedKey = equals(
+-                aEntry[0],
+-                bEntry[0],
++      }
++      // Remove the first value from the stack of traversed values.
++      aStack.pop();
++      bStack.pop();
++      return allFound;
++    } else if (
++      isA<Map<unknown, unknown>>('Map', a) ||
++      isImmutableUnorderedKeyed(a)
++    ) {
++      let allFound = true;
++      for (const aEntry of a) {
++        if (
++          !b.has(aEntry[0]) ||
++          !equals(aEntry[1], b.get(aEntry[0]), filteredCustomTesters)
++        ) {
++          let has = false;
++          for (const bEntry of b) {
++            const matchedKey = equals(
++              aEntry[0],
++              bEntry[0],
++              filteredCustomTesters,
++            );
++
++            let matchedValue = false;
++            if (matchedKey === true) {
++              matchedValue = equals(
++                aEntry[1],
++                bEntry[1],
+                 filteredCustomTesters,
+               );
+-
+-              let matchedValue = false;
+-              if (matchedKey === true) {
+-                matchedValue = equals(
+-                  aEntry[1],
+-                  bEntry[1],
+-                  filteredCustomTesters,
+-                );
+-              }
+-              if (matchedValue === true) {
+-                has = true;
+-              }
+             }
+-
+-            if (has === false) {
+-              allFound = false;
+-              break;
++            if (matchedValue === true) {
++              has = true;
+             }
+           }
++
++          if (has !== false) {
++            allFound = false;
++            break;
++          }
+         }
+-        return allFound;
+       }
++      // Remove the first value from the stack of traversed values.
++      aStack.pop();
++      bStack.pop();
++      return allFound;
+     }
++  }
+ 
+-    const bIterator = b[IteratorSymbol]();
+-
+-    for (const aValue of a) {
+-      const nextB = bIterator.next();
+-      if (nextB.done || !equals(aValue, nextB.value, filteredCustomTesters)) {
+-        return false;
+-      }
+-    }
+-    if (!bIterator.next().done) {
+-      return false;
+-    }
++  let aIterator: Iterator<unknown>;
++  let bIterator: Iterator<unknown>;
++  try {
++    aIterator = a[IteratorSymbol]();
++    bIterator = b[IteratorSymbol]();
++  } catch {
++    // If the iterator factory itself throws (e.g. a TypedArray method used as
++    // [Symbol.iterator] on a plain object), we cannot compare as iterables.
++    // Return undefined so equals() falls through to Object.is / property checks.
++    aStack.pop();
++    bStack.pop();
++    return undefined;
++  }
+ 
++  let aStep = aIterator.next();
++  while (!aStep.done) {
++    const bStep = bIterator.next();
+     if (
+-      !isImmutableList(a) &&
+-      !isImmutableOrderedKeyed(a) &&
+-      !isImmutableOrderedSet(a) &&
+-      !isImmutableRecord(a)
++      bStep.done ||
++      !equals(aStep.value, bStep.value, filteredCustomTesters)
+     ) {
+-      const aEntries = entries(a);
+-      const bEntries = entries(b);
+-      if (!equals(aEntries, bEntries)) {
+-        return false;
+-      }
++      aStack.pop();
++      bStack.pop();
++      return false;
+     }
+-
+-    return true;
+-  } catch {
+-    // If an exotic iterator/getter throws (DOM objects, proxies, host objects),
+-    // treat it as "not equal" rather than crashing the matcher.
+-    return false;
+-  } finally {
++    aStep = aIterator.next();
++  }
++  if (!bIterator.next().done) {
+     aStack.pop();
+     bStack.pop();
++    return false;
+   }
++
++  if (
++    !isImmutableList(a) &&
++    !isImmutableOrderedKeyed(a) &&
++    !isImmutableOrderedSet(a) &&
++    !isImmutableRecord(a)
++  ) {
++    const aEntries = entries(a);
++    const bEntries = entries(b);
++    if (!equals(aEntries, bEntries)) {
++      aStack.pop();
++      bStack.pop();
++      return false;
++    }
++  }
++
++  // Remove the first value from the stack of traversed values.
++  aStack.pop();
++  bStack.pop();
++  return true;
+ };
+ 
+ const entries = (obj: any) => {
+diff --git a/packages/expect/src/__tests__/matchers.test.js b/packages/expect/src/__tests__/matchers.test.js
+index dfe27e4ddacf..bfb4f7a4491a 100644
+--- a/packages/expect/src/__tests__/matchers.test.js
++++ b/packages/expect/src/__tests__/matchers.test.js
+@@ -2389,4 +2389,14 @@ describe('toMatchObject()', () => {
+       [sym]: true,
+     });
+   });
++
++  test('does not throw on exotic iterables (e.g. TypedArray iterator on plain object)', () => {
++    const badIterable = {
++      [Symbol.iterator]: Uint8Array.prototype[Symbol.iterator],
++    };
++    expect(() =>
++      jestExpect([badIterable]).toMatchObject([badIterable]),
++    ).not.toThrow();
++    jestExpect([badIterable]).toMatchObject([badIterable]);
++  });
+ });
+
+From 23559155123825049818d0f9e3901329961adb41 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 20:05:12 +0200
+Subject: [PATCH 7/7] less diff
+
+---
+ packages/expect-utils/src/utils.ts | 18 +++++-------------
+ 1 file changed, 5 insertions(+), 13 deletions(-)
+
+diff --git a/packages/expect-utils/src/utils.ts b/packages/expect-utils/src/utils.ts
+index 38f1adc12d1b..eb234129e2f1 100644
+--- a/packages/expect-utils/src/utils.ts
++++ b/packages/expect-utils/src/utils.ts
+@@ -218,17 +218,17 @@ export const iterableEquality = (
+   aStack.push(a);
+   bStack.push(b);
+ 
+-  // Replace any instance of iterableEquality with the new iterableEqualityWithStack
+-  // so we can do circular detection.
+-  const iterableEqualityWithStack = (aInner: any, bInner: any) =>
++  const iterableEqualityWithStack = (a: any, b: any) =>
+     iterableEquality(
+-      aInner,
+-      bInner,
++      a,
++      b,
+       [...filteredCustomTesters],
+       [...aStack],
+       [...bStack],
+     );
+ 
++  // Replace any instance of iterableEquality with the new
++  // iterableEqualityWithStack so we can do circular detection
+   const filteredCustomTesters: Array<Tester> = [
+     ...customTesters.filter(t => t !== iterableEquality),
+     iterableEqualityWithStack,
+@@ -236,8 +236,6 @@ export const iterableEquality = (
+ 
+   if (a.size !== undefined) {
+     if (a.size !== b.size) {
+-      aStack.pop();
+-      bStack.pop();
+       return false;
+     } else if (isA<Set<unknown>>('Set', a) || isImmutableUnorderedSet(a)) {
+       let allFound = true;
+@@ -326,15 +324,11 @@ export const iterableEquality = (
+       bStep.done ||
+       !equals(aStep.value, bStep.value, filteredCustomTesters)
+     ) {
+-      aStack.pop();
+-      bStack.pop();
+       return false;
+     }
+     aStep = aIterator.next();
+   }
+   if (!bIterator.next().done) {
+-    aStack.pop();
+-    bStack.pop();
+     return false;
+   }
+ 
+@@ -347,8 +341,6 @@ export const iterableEquality = (
+     const aEntries = entries(a);
+     const bEntries = entries(b);
+     if (!equals(aEntries, bEntries)) {
+-      aStack.pop();
+-      bStack.pop();
+       return false;
+     }
+   }

@@ -1,0 +1,2459 @@
+From e828d71c8a43fc3a301bb4a626adb98497ff26f0 Mon Sep 17 00:00:00 2001
+From: Jake Bailey <5341706+jakebailey@users.noreply.github.com>
+Date: Thu, 30 Oct 2025 13:48:42 -0700
+Subject: [PATCH] Apply tsgo PR 1987 to tsgo-port
+
+---
+ src/compiler/checker.ts                       |  66 ++-
+ .../reference/arrayAssignmentTest1.errors.txt |  12 +-
+ ...gnmentCompatWithCallSignatures3.errors.txt |   4 +-
+ ...tCompatWithConstructSignatures3.errors.txt |   4 +-
+ ...ignmentCompatWithNumericIndexer.errors.txt |   8 +-
+ ...gnmentCompatWithNumericIndexer2.errors.txt |   8 +-
+ ...signmentCompatWithStringIndexer.errors.txt |  12 +-
+ ...ignmentCompatWithStringIndexer2.errors.txt |  12 +-
+ ...ConstrainedToOtherTypeParameter.errors.txt |   4 +-
+ .../checkJsxChildrenCanBeTupleType.types      |   2 +-
+ .../contextuallyTypedJsxChildren.types        |   2 +-
+ .../emitClassExpressionInDeclarationFile.js   |   4 +-
+ ...rfaceExtendingClassWithPrivates.errors.txt |   4 +-
+ ...aceExtendingClassWithProtecteds.errors.txt |   4 +-
+ .../intraExpressionInferencesJsx.types        |   2 +-
+ .../invalidReturnStatements.errors.txt        |   4 +-
+ .../reference/jsdocTypeTagCast.errors.txt     |   4 +-
+ .../jsxCallElaborationCheckNoCrash1.types     |   2 +-
+ ...xChildrenIndividualErrorElaborations.types |   2 +-
+ ...omplexSignatureHasApplicabilityError.types |   2 +-
+ .../baselines/reference/jsxElementType.types  |   2 +-
+ .../jsxElementTypeLiteralWithGeneric.types    |   2 +-
+ .../jsxExcessPropsAndAssignability.types      |   2 +-
+ .../jsxIntrinsicElementsCompatability.types   |   2 +-
+ ...estedSelfClosingChild(jsx=react-jsx).types |   2 +-
+ ...edSelfClosingChild(jsx=react-jsxdev).types |   2 +-
+ ...enthesizedJSDocCastAtReturnStatement.types |   2 +-
+ .../quickinfoVerbosityClass1.baseline         | 210 +++----
+ .../quickinfoVerbosityInterface1.baseline     | 538 +++++++++---------
+ .../reference/reactHOCSpreadprops.types       |   2 +-
+ .../reactReadonlyHOCAssignabilityReal.types   |   2 +-
+ ...returnConditionalExpressionJSDocCast.types |   2 +-
+ ...dicateIsInstantiateInContextOfTarget.types |   2 +-
+ .../reference/tsxInvokeComponentType.types    |   2 +-
+ .../tsxNotUsingApparentTypeOfSFC.types        |   2 +-
+ ...ropsInferenceSucceedsOnIntersections.types |   2 +-
+ .../reference/typeAssertions.errors.txt       |   4 +-
+ ...typeInferenceWithExcessPropertiesJsx.types |   2 +-
+ .../codefixClassImplementInterface_omit.ts    |   2 +-
+ 39 files changed, 493 insertions(+), 453 deletions(-)
+
+diff --git a/src/compiler/checker.ts b/src/compiler/checker.ts
+index 5be72511868db..40ee72ad1e038 100644
+--- a/src/compiler/checker.ts
++++ b/src/compiler/checker.ts
+@@ -5552,23 +5552,63 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
+             (name as string).charCodeAt(2) !== CharacterCodes.hash;
+     }
+ 
+-    function getNamedMembers(members: SymbolTable): Symbol[] {
+-        let result: Symbol[] | undefined;
++    function getNamedMembers(members: SymbolTable, container: Symbol | undefined): Symbol[] {
++        if (!TSGO_COMPAT) {
++            let result: Symbol[] | undefined;
++            members.forEach((symbol, id) => {
++                if (isNamedMember(symbol, id)) {
++                    (result || (result = [])).push(symbol);
++                }
++            });
++            return result || emptyArray;
++        }
++
++        if (members.size === 0) {
++            return emptyArray;
++        }
++
++        // For classes and interfaces, we store explicitly declared members ahead of inherited members. This ensures we process
++        // explicitly declared members first in type relations, which is beneficial because explicitly declared members are more
++        // likely to contain discriminating differences. See for example https://github.com/microsoft/typescript-go/issues/1968.
++        let contained: Symbol[] | undefined;
++        if (container && container.flags & (SymbolFlags.Class | SymbolFlags.Interface)) {
++            members.forEach((symbol, id) => {
++                if (isNamedMember(symbol, id) && isDeclarationContainedBy(symbol, container)) {
++                    contained = append(contained, symbol);
++                }
++            });
++        }
++
++        let nonContained: Symbol[] | undefined;
+         members.forEach((symbol, id) => {
+-            if (isNamedMember(symbol, id)) {
+-                (result || (result = [])).push(symbol);
++            if (isNamedMember(symbol, id) && (!container || !(container.flags & (SymbolFlags.Class | SymbolFlags.Interface)) || !isDeclarationContainedBy(symbol, container))) {
++                nonContained = append(nonContained, symbol);
+             }
+         });
+-        sortSymbolsIfTSGoCompat(result);
+-        return result || emptyArray;
++
++        contained?.sort(compareSymbols);
++        nonContained?.sort(compareSymbols);
++        return concatenate(contained, nonContained) || emptyArray;
++
++        function isDeclarationContainedBy(symbol: Symbol, container: Symbol): boolean {
++            const declaration = symbol.valueDeclaration;
++            if (declaration) {
++                return some(container.declarations, d => containedBy(declaration, d));
++            }
++            return false;
++
++            function containedBy(a: Node, b: Node): boolean {
++                return b.pos <= a.pos && b.end >= a.end;
++            }
++        }
+     }
+ 
+     function isNamedMember(member: Symbol, escapedName: __String) {
+         return !isReservedMemberName(escapedName) && symbolIsValue(member);
+     }
+ 
+-    function getNamedOrIndexSignatureMembers(members: SymbolTable): Symbol[] {
+-        const result = getNamedMembers(members);
++    function getNamedOrIndexSignatureMembers(members: SymbolTable, symbol: Symbol): Symbol[] {
++        const result = getNamedMembers(members, symbol);
+         const index = getIndexSymbolFromSymbolTable(members);
+         return index ? concatenate(result, [index]) : result;
+     }
+@@ -5581,7 +5621,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
+         resolved.constructSignatures = constructSignatures;
+         resolved.indexInfos = indexInfos;
+         // This can loop back to getPropertyOfType() which would crash if `callSignatures` & `constructSignatures` are not initialized.
+-        if (members !== emptySymbols) resolved.properties = getNamedMembers(members);
++        if (members !== emptySymbols) resolved.properties = getNamedMembers(members, type.symbol);
+         return resolved;
+     }
+ 
+@@ -13689,7 +13729,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
+         if (!(type as InterfaceTypeWithDeclaredMembers).declaredProperties) {
+             const symbol = type.symbol;
+             const members = getMembersOfSymbol(symbol);
+-            (type as InterfaceTypeWithDeclaredMembers).declaredProperties = getNamedMembers(members);
++            (type as InterfaceTypeWithDeclaredMembers).declaredProperties = getNamedMembers(members, symbol);
+             // Start with signatures at empty array in case of recursive types
+             (type as InterfaceTypeWithDeclaredMembers).declaredCallSignatures = emptyArray;
+             (type as InterfaceTypeWithDeclaredMembers).declaredConstructSignatures = emptyArray;
+@@ -14565,7 +14605,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
+             const classType = getDeclaredTypeOfClassOrInterface(symbol);
+             const baseConstructorType = getBaseConstructorTypeOfClass(classType);
+             if (baseConstructorType.flags & (TypeFlags.Object | TypeFlags.Intersection | TypeFlags.TypeVariable)) {
+-                members = createSymbolTable(getNamedOrIndexSignatureMembers(members));
++                members = createSymbolTable(getNamedOrIndexSignatureMembers(members, symbol));
+                 addInheritedMembers(members, getPropertiesOfType(baseConstructorType));
+             }
+             else if (baseConstructorType === anyType) {
+@@ -15028,7 +15068,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
+                     break;
+                 }
+             }
+-            type.resolvedProperties = getNamedMembers(members);
++            type.resolvedProperties = getNamedMembers(members, type.symbol);
+         }
+         return type.resolvedProperties;
+     }
+@@ -50033,7 +50073,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
+                 }
+             });
+         }
+-        return getNamedMembers(propsByName);
++        return getNamedMembers(propsByName, /*container*/ undefined);
+     }
+ 
+     function typeHasCallOrConstructSignatures(type: Type): boolean {
+diff --git a/tests/baselines/reference/arrayAssignmentTest1.errors.txt b/tests/baselines/reference/arrayAssignmentTest1.errors.txt
+index c44c91fa63949..c22688b1bdb46 100644
+--- a/tests/baselines/reference/arrayAssignmentTest1.errors.txt
++++ b/tests/baselines/reference/arrayAssignmentTest1.errors.txt
+@@ -1,6 +1,6 @@
+ arrayAssignmentTest1.ts(46,5): error TS2741: Property 'IM1' is missing in type 'undefined[]' but required in type 'I1'.
+ arrayAssignmentTest1.ts(47,5): error TS2739: Type 'undefined[]' is missing the following properties from type 'C1': IM1, C1M1
+-arrayAssignmentTest1.ts(48,5): error TS2739: Type 'undefined[]' is missing the following properties from type 'C2': IM1, C1M1, C2M1
++arrayAssignmentTest1.ts(48,5): error TS2739: Type 'undefined[]' is missing the following properties from type 'C2': C2M1, IM1, C1M1
+ arrayAssignmentTest1.ts(49,5): error TS2741: Property 'CM3M1' is missing in type 'undefined[]' but required in type 'C3'.
+ arrayAssignmentTest1.ts(60,1): error TS2322: Type 'C3[]' is not assignable to type 'I1[]'.
+   Property 'IM1' is missing in type 'C3' but required in type 'I1'.
+@@ -11,9 +11,9 @@ arrayAssignmentTest1.ts(65,1): error TS2322: Type 'C3[]' is not assignable to ty
+ arrayAssignmentTest1.ts(68,1): error TS2322: Type 'C1[]' is not assignable to type 'C2[]'.
+   Property 'C2M1' is missing in type 'C1' but required in type 'C2'.
+ arrayAssignmentTest1.ts(69,1): error TS2322: Type 'I1[]' is not assignable to type 'C2[]'.
+-  Type 'I1' is missing the following properties from type 'C2': C1M1, C2M1
++  Type 'I1' is missing the following properties from type 'C2': C2M1, C1M1
+ arrayAssignmentTest1.ts(70,1): error TS2322: Type 'C3[]' is not assignable to type 'C2[]'.
+-  Type 'C3' is missing the following properties from type 'C2': IM1, C1M1, C2M1
++  Type 'C3' is missing the following properties from type 'C2': C2M1, IM1, C1M1
+ arrayAssignmentTest1.ts(75,1): error TS2322: Type 'C2[]' is not assignable to type 'C3[]'.
+   Property 'CM3M1' is missing in type 'C2' but required in type 'C3'.
+ arrayAssignmentTest1.ts(76,1): error TS2322: Type 'C1[]' is not assignable to type 'C3[]'.
+@@ -83,7 +83,7 @@ arrayAssignmentTest1.ts(85,1): error TS2740: Type 'I1' is missing the following
+ !!! error TS2739: Type 'undefined[]' is missing the following properties from type 'C1': IM1, C1M1
+     var c2_error: C2 = []; // should be an error - is
+         ~~~~~~~~
+-!!! error TS2739: Type 'undefined[]' is missing the following properties from type 'C2': IM1, C1M1, C2M1
++!!! error TS2739: Type 'undefined[]' is missing the following properties from type 'C2': C2M1, IM1, C1M1
+     var c3_error: C3 = []; // should be an error - is
+         ~~~~~~~~
+ !!! error TS2741: Property 'CM3M1' is missing in type 'undefined[]' but required in type 'C3'.
+@@ -125,11 +125,11 @@ arrayAssignmentTest1.ts(85,1): error TS2740: Type 'I1' is missing the following
+     arr_c2 = arr_i1; // should be an error - subtype relationship - is
+     ~~~~~~
+ !!! error TS2322: Type 'I1[]' is not assignable to type 'C2[]'.
+-!!! error TS2322:   Type 'I1' is missing the following properties from type 'C2': C1M1, C2M1
++!!! error TS2322:   Type 'I1' is missing the following properties from type 'C2': C2M1, C1M1
+     arr_c2 = arr_c3; // should be an error - is
+     ~~~~~~
+ !!! error TS2322: Type 'C3[]' is not assignable to type 'C2[]'.
+-!!! error TS2322:   Type 'C3' is missing the following properties from type 'C2': IM1, C1M1, C2M1
++!!! error TS2322:   Type 'C3' is missing the following properties from type 'C2': C2M1, IM1, C1M1
+     
+     // "clean up bug" occurs at this point
+     // if you move these three expressions to another file, they raise an error
+diff --git a/tests/baselines/reference/assignmentCompatWithCallSignatures3.errors.txt b/tests/baselines/reference/assignmentCompatWithCallSignatures3.errors.txt
+index b10e53d32b276..1d1c9bfdcebd3 100644
+--- a/tests/baselines/reference/assignmentCompatWithCallSignatures3.errors.txt
++++ b/tests/baselines/reference/assignmentCompatWithCallSignatures3.errors.txt
+@@ -46,7 +46,7 @@ assignmentCompatWithCallSignatures3.ts(80,1): error TS2322: Type '(x: Base[], y:
+   Types of parameters 'y' and 'y' are incompatible.
+     Type 'T' is not assignable to type 'Derived2[]'.
+       Type 'Base[]' is not assignable to type 'Derived2[]'.
+-        Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++        Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithCallSignatures3.ts(83,1): error TS2322: Type '(x: Base[], y: Derived[]) => Derived[]' is not assignable to type '<T extends Array<Derived>>(x: Base[], y: T) => T'.
+   Type 'Derived[]' is not assignable to type 'T'.
+     'Derived[]' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'Derived[]'.
+@@ -208,7 +208,7 @@ assignmentCompatWithCallSignatures3.ts(86,1): error TS2322: Type '(x: { a: strin
+ !!! error TS2322:   Types of parameters 'y' and 'y' are incompatible.
+ !!! error TS2322:     Type 'T' is not assignable to type 'Derived2[]'.
+ !!! error TS2322:       Type 'Base[]' is not assignable to type 'Derived2[]'.
+-!!! error TS2322:         Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:         Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     var b13: <T extends Array<Derived>>(x: Array<Base>, y: T) => T; 
+     a13 = b13; // ok
+     b13 = a13; // ok
+diff --git a/tests/baselines/reference/assignmentCompatWithConstructSignatures3.errors.txt b/tests/baselines/reference/assignmentCompatWithConstructSignatures3.errors.txt
+index cb003d57722a5..ce2b75804682f 100644
+--- a/tests/baselines/reference/assignmentCompatWithConstructSignatures3.errors.txt
++++ b/tests/baselines/reference/assignmentCompatWithConstructSignatures3.errors.txt
+@@ -46,7 +46,7 @@ assignmentCompatWithConstructSignatures3.ts(80,1): error TS2322: Type 'new (x: B
+   Types of parameters 'y' and 'y' are incompatible.
+     Type 'T' is not assignable to type 'Derived2[]'.
+       Type 'Base[]' is not assignable to type 'Derived2[]'.
+-        Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++        Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithConstructSignatures3.ts(83,1): error TS2322: Type 'new (x: Base[], y: Derived[]) => Derived[]' is not assignable to type 'new <T extends Array<Derived>>(x: Base[], y: T) => T'.
+   Type 'Derived[]' is not assignable to type 'T'.
+     'Derived[]' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'Derived[]'.
+@@ -208,7 +208,7 @@ assignmentCompatWithConstructSignatures3.ts(86,1): error TS2322: Type 'new (x: {
+ !!! error TS2322:   Types of parameters 'y' and 'y' are incompatible.
+ !!! error TS2322:     Type 'T' is not assignable to type 'Derived2[]'.
+ !!! error TS2322:       Type 'Base[]' is not assignable to type 'Derived2[]'.
+-!!! error TS2322:         Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:         Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     var b13: new <T extends Array<Derived>>(x: Array<Base>, y: T) => T; 
+     a13 = b13; // ok
+     b13 = a13; // ok
+diff --git a/tests/baselines/reference/assignmentCompatWithNumericIndexer.errors.txt b/tests/baselines/reference/assignmentCompatWithNumericIndexer.errors.txt
+index 29afe5af4af1d..f990fc308dcb9 100644
+--- a/tests/baselines/reference/assignmentCompatWithNumericIndexer.errors.txt
++++ b/tests/baselines/reference/assignmentCompatWithNumericIndexer.errors.txt
+@@ -3,7 +3,7 @@ assignmentCompatWithNumericIndexer.ts(14,1): error TS2322: Type 'A' is not assig
+     Property 'bar' is missing in type 'Base' but required in type 'Derived'.
+ assignmentCompatWithNumericIndexer.ts(18,1): error TS2322: Type 'A' is not assignable to type '{ [x: number]: Derived2; }'.
+   'number' index signatures are incompatible.
+-    Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++    Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithNumericIndexer.ts(32,9): error TS2322: Type '{ [x: number]: Derived; }' is not assignable to type 'A<T>'.
+   'number' index signatures are incompatible.
+     Type 'Derived' is not assignable to type 'T'.
+@@ -19,7 +19,7 @@ assignmentCompatWithNumericIndexer.ts(36,9): error TS2322: Type '{ [x: number]:
+ assignmentCompatWithNumericIndexer.ts(37,9): error TS2322: Type 'A<T>' is not assignable to type '{ [x: number]: Derived2; }'.
+   'number' index signatures are incompatible.
+     Type 'T' is not assignable to type 'Derived2'.
+-      Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++      Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ 
+ 
+ ==== assignmentCompatWithNumericIndexer.ts (6 errors) ====
+@@ -49,7 +49,7 @@ assignmentCompatWithNumericIndexer.ts(37,9): error TS2322: Type 'A<T>' is not as
+     ~~
+ !!! error TS2322: Type 'A' is not assignable to type '{ [x: number]: Derived2; }'.
+ !!! error TS2322:   'number' index signatures are incompatible.
+-!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+     module Generics {
+         class A<T extends Base> {
+@@ -89,7 +89,7 @@ assignmentCompatWithNumericIndexer.ts(37,9): error TS2322: Type 'A<T>' is not as
+ !!! error TS2322: Type 'A<T>' is not assignable to type '{ [x: number]: Derived2; }'.
+ !!! error TS2322:   'number' index signatures are incompatible.
+ !!! error TS2322:     Type 'T' is not assignable to type 'Derived2'.
+-!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+             var b3: { [x: number]: T; }
+             a = b3; // ok
+diff --git a/tests/baselines/reference/assignmentCompatWithNumericIndexer2.errors.txt b/tests/baselines/reference/assignmentCompatWithNumericIndexer2.errors.txt
+index c922ace6474ff..0afe61148c6b4 100644
+--- a/tests/baselines/reference/assignmentCompatWithNumericIndexer2.errors.txt
++++ b/tests/baselines/reference/assignmentCompatWithNumericIndexer2.errors.txt
+@@ -3,7 +3,7 @@ assignmentCompatWithNumericIndexer2.ts(14,1): error TS2322: Type 'A' is not assi
+     Property 'bar' is missing in type 'Base' but required in type 'Derived'.
+ assignmentCompatWithNumericIndexer2.ts(18,1): error TS2322: Type 'A' is not assignable to type '{ [x: number]: Derived2; }'.
+   'number' index signatures are incompatible.
+-    Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++    Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithNumericIndexer2.ts(32,9): error TS2322: Type '{ [x: number]: Derived; }' is not assignable to type 'A<T>'.
+   'number' index signatures are incompatible.
+     Type 'Derived' is not assignable to type 'T'.
+@@ -19,7 +19,7 @@ assignmentCompatWithNumericIndexer2.ts(36,9): error TS2322: Type '{ [x: number]:
+ assignmentCompatWithNumericIndexer2.ts(37,9): error TS2322: Type 'A<T>' is not assignable to type '{ [x: number]: Derived2; }'.
+   'number' index signatures are incompatible.
+     Type 'T' is not assignable to type 'Derived2'.
+-      Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++      Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ 
+ 
+ ==== assignmentCompatWithNumericIndexer2.ts (6 errors) ====
+@@ -49,7 +49,7 @@ assignmentCompatWithNumericIndexer2.ts(37,9): error TS2322: Type 'A<T>' is not a
+     ~~
+ !!! error TS2322: Type 'A' is not assignable to type '{ [x: number]: Derived2; }'.
+ !!! error TS2322:   'number' index signatures are incompatible.
+-!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+     module Generics {
+         interface A<T extends Base> {
+@@ -89,7 +89,7 @@ assignmentCompatWithNumericIndexer2.ts(37,9): error TS2322: Type 'A<T>' is not a
+ !!! error TS2322: Type 'A<T>' is not assignable to type '{ [x: number]: Derived2; }'.
+ !!! error TS2322:   'number' index signatures are incompatible.
+ !!! error TS2322:     Type 'T' is not assignable to type 'Derived2'.
+-!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+             var b3: { [x: number]: T; }
+             a = b3; // ok
+diff --git a/tests/baselines/reference/assignmentCompatWithStringIndexer.errors.txt b/tests/baselines/reference/assignmentCompatWithStringIndexer.errors.txt
+index 3244816f126c1..ea6734d5a8622 100644
+--- a/tests/baselines/reference/assignmentCompatWithStringIndexer.errors.txt
++++ b/tests/baselines/reference/assignmentCompatWithStringIndexer.errors.txt
+@@ -3,13 +3,13 @@ assignmentCompatWithStringIndexer.ts(15,1): error TS2322: Type 'A' is not assign
+     Property 'bar' is missing in type 'Base' but required in type 'Derived'.
+ assignmentCompatWithStringIndexer.ts(19,1): error TS2322: Type 'A' is not assignable to type '{ [x: string]: Derived2; }'.
+   'string' index signatures are incompatible.
+-    Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++    Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithStringIndexer.ts(33,5): error TS2322: Type 'A<Base>' is not assignable to type '{ [x: string]: Derived; }'.
+   'string' index signatures are incompatible.
+     Property 'bar' is missing in type 'Base' but required in type 'Derived'.
+ assignmentCompatWithStringIndexer.ts(41,5): error TS2322: Type 'A<Base>' is not assignable to type '{ [x: string]: Derived2; }'.
+   'string' index signatures are incompatible.
+-    Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++    Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithStringIndexer.ts(46,9): error TS2322: Type '{ [x: string]: Derived; }' is not assignable to type 'A<T>'.
+   'string' index signatures are incompatible.
+     Type 'Derived' is not assignable to type 'T'.
+@@ -25,7 +25,7 @@ assignmentCompatWithStringIndexer.ts(50,9): error TS2322: Type '{ [x: string]: D
+ assignmentCompatWithStringIndexer.ts(51,9): error TS2322: Type 'A<T>' is not assignable to type '{ [x: string]: Derived2; }'.
+   'string' index signatures are incompatible.
+     Type 'T' is not assignable to type 'Derived2'.
+-      Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++      Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ 
+ 
+ ==== assignmentCompatWithStringIndexer.ts (8 errors) ====
+@@ -56,7 +56,7 @@ assignmentCompatWithStringIndexer.ts(51,9): error TS2322: Type 'A<T>' is not ass
+     ~~
+ !!! error TS2322: Type 'A' is not assignable to type '{ [x: string]: Derived2; }'.
+ !!! error TS2322:   'string' index signatures are incompatible.
+-!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+     module Generics {
+         class A<T extends Base> {
+@@ -87,7 +87,7 @@ assignmentCompatWithStringIndexer.ts(51,9): error TS2322: Type 'A<T>' is not ass
+         ~~
+ !!! error TS2322: Type 'A<Base>' is not assignable to type '{ [x: string]: Derived2; }'.
+ !!! error TS2322:   'string' index signatures are incompatible.
+-!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+         function foo<T extends Base>() {
+             var b3: { [x: string]: Derived; };
+@@ -118,6 +118,6 @@ assignmentCompatWithStringIndexer.ts(51,9): error TS2322: Type 'A<T>' is not ass
+ !!! error TS2322: Type 'A<T>' is not assignable to type '{ [x: string]: Derived2; }'.
+ !!! error TS2322:   'string' index signatures are incompatible.
+ !!! error TS2322:     Type 'T' is not assignable to type 'Derived2'.
+-!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+         }
+     }
+\ No newline at end of file
+diff --git a/tests/baselines/reference/assignmentCompatWithStringIndexer2.errors.txt b/tests/baselines/reference/assignmentCompatWithStringIndexer2.errors.txt
+index 1d9087e85097c..c330a9fa38b33 100644
+--- a/tests/baselines/reference/assignmentCompatWithStringIndexer2.errors.txt
++++ b/tests/baselines/reference/assignmentCompatWithStringIndexer2.errors.txt
+@@ -3,13 +3,13 @@ assignmentCompatWithStringIndexer2.ts(15,1): error TS2322: Type 'A' is not assig
+     Property 'bar' is missing in type 'Base' but required in type 'Derived'.
+ assignmentCompatWithStringIndexer2.ts(19,1): error TS2322: Type 'A' is not assignable to type '{ [x: string]: Derived2; }'.
+   'string' index signatures are incompatible.
+-    Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++    Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithStringIndexer2.ts(33,5): error TS2322: Type 'A<Base>' is not assignable to type '{ [x: string]: Derived; }'.
+   'string' index signatures are incompatible.
+     Property 'bar' is missing in type 'Base' but required in type 'Derived'.
+ assignmentCompatWithStringIndexer2.ts(41,5): error TS2322: Type 'A<Base>' is not assignable to type '{ [x: string]: Derived2; }'.
+   'string' index signatures are incompatible.
+-    Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++    Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ assignmentCompatWithStringIndexer2.ts(46,9): error TS2322: Type '{ [x: string]: Derived; }' is not assignable to type 'A<T>'.
+   'string' index signatures are incompatible.
+     Type 'Derived' is not assignable to type 'T'.
+@@ -25,7 +25,7 @@ assignmentCompatWithStringIndexer2.ts(50,9): error TS2322: Type '{ [x: string]:
+ assignmentCompatWithStringIndexer2.ts(51,9): error TS2322: Type 'A<T>' is not assignable to type '{ [x: string]: Derived2; }'.
+   'string' index signatures are incompatible.
+     Type 'T' is not assignable to type 'Derived2'.
+-      Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++      Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+ 
+ 
+ ==== assignmentCompatWithStringIndexer2.ts (8 errors) ====
+@@ -56,7 +56,7 @@ assignmentCompatWithStringIndexer2.ts(51,9): error TS2322: Type 'A<T>' is not as
+     ~~
+ !!! error TS2322: Type 'A' is not assignable to type '{ [x: string]: Derived2; }'.
+ !!! error TS2322:   'string' index signatures are incompatible.
+-!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+     module Generics {
+         interface A<T extends Base> {
+@@ -87,7 +87,7 @@ assignmentCompatWithStringIndexer2.ts(51,9): error TS2322: Type 'A<T>' is not as
+         ~~
+ !!! error TS2322: Type 'A<Base>' is not assignable to type '{ [x: string]: Derived2; }'.
+ !!! error TS2322:   'string' index signatures are incompatible.
+-!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:     Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+     
+         function foo<T extends Base>() {
+             var b3: { [x: string]: Derived; };
+@@ -118,6 +118,6 @@ assignmentCompatWithStringIndexer2.ts(51,9): error TS2322: Type 'A<T>' is not as
+ !!! error TS2322: Type 'A<T>' is not assignable to type '{ [x: string]: Derived2; }'.
+ !!! error TS2322:   'string' index signatures are incompatible.
+ !!! error TS2322:     Type 'T' is not assignable to type 'Derived2'.
+-!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': bar, baz
++!!! error TS2322:       Type 'Base' is missing the following properties from type 'Derived2': baz, bar
+         }
+     }
+\ No newline at end of file
+diff --git a/tests/baselines/reference/chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.errors.txt b/tests/baselines/reference/chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.errors.txt
+index 66e34d66b49b0..6679063d1a3bf 100644
+--- a/tests/baselines/reference/chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.errors.txt
++++ b/tests/baselines/reference/chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.errors.txt
+@@ -1,5 +1,5 @@
+ chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts(19,64): error TS2741: Property 'z' is missing in type 'B' but required in type 'C'.
+-chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts(19,81): error TS2739: Type 'A' is missing the following properties from type 'C': y, z
++chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts(19,81): error TS2739: Type 'A' is missing the following properties from type 'C': z, y
+ 
+ 
+ ==== chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts (2 errors) ====
+@@ -27,5 +27,5 @@ chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts(19,81): error TS
+ !!! related TS2728 chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts:15:5: 'z' is declared here.
+ !!! related TS6502 chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts:3:27: The expected type comes from the return type of this signature.
+                                                                                     ~~~~~
+-!!! error TS2739: Type 'A' is missing the following properties from type 'C': y, z
++!!! error TS2739: Type 'A' is missing the following properties from type 'C': z, y
+ !!! related TS6502 chainedCallsWithTypeParameterConstrainedToOtherTypeParameter.ts:3:27: The expected type comes from the return type of this signature.
+\ No newline at end of file
+diff --git a/tests/baselines/reference/checkJsxChildrenCanBeTupleType.types b/tests/baselines/reference/checkJsxChildrenCanBeTupleType.types
+index e9130f5fe42f2..825cc5ae57c09 100644
+--- a/tests/baselines/reference/checkJsxChildrenCanBeTupleType.types
++++ b/tests/baselines/reference/checkJsxChildrenCanBeTupleType.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/contextuallyTypedJsxChildren.types b/tests/baselines/reference/contextuallyTypedJsxChildren.types
+index 7de965ed669ae..a2a38b1e2739f 100644
+--- a/tests/baselines/reference/contextuallyTypedJsxChildren.types
++++ b/tests/baselines/reference/contextuallyTypedJsxChildren.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/emitClassExpressionInDeclarationFile.js b/tests/baselines/reference/emitClassExpressionInDeclarationFile.js
+index cd068fc1b9550..b975cf77eb8b5 100644
+--- a/tests/baselines/reference/emitClassExpressionInDeclarationFile.js
++++ b/tests/baselines/reference/emitClassExpressionInDeclarationFile.js
+@@ -90,17 +90,17 @@ export declare class FooItem {
+ export type Constructor<T> = new (...args: any[]) => T;
+ export declare function WithTags<T extends Constructor<FooItem>>(Base: T): {
+     new (...args: any[]): {
++        tags(): void;
+         foo(): void;
+         name?: string;
+-        tags(): void;
+     };
+     getTags(): void;
+ } & T;
+ declare const Test_base: {
+     new (...args: any[]): {
++        tags(): void;
+         foo(): void;
+         name?: string;
+-        tags(): void;
+     };
+     getTags(): void;
+ } & typeof FooItem;
+diff --git a/tests/baselines/reference/implementingAnInterfaceExtendingClassWithPrivates.errors.txt b/tests/baselines/reference/implementingAnInterfaceExtendingClassWithPrivates.errors.txt
+index 2e7173670add8..e560d45c478ac 100644
+--- a/tests/baselines/reference/implementingAnInterfaceExtendingClassWithPrivates.errors.txt
++++ b/tests/baselines/reference/implementingAnInterfaceExtendingClassWithPrivates.errors.txt
+@@ -1,5 +1,5 @@
+ implementingAnInterfaceExtendingClassWithPrivates.ts(9,7): error TS2420: Class 'Bar' incorrectly implements interface 'I'.
+-  Type 'Bar' is missing the following properties from type 'I': x, y
++  Type 'Bar' is missing the following properties from type 'I': y, x
+ implementingAnInterfaceExtendingClassWithPrivates.ts(12,7): error TS2420: Class 'Bar2' incorrectly implements interface 'I'.
+   Property 'x' is missing in type 'Bar2' but required in type 'I'.
+ implementingAnInterfaceExtendingClassWithPrivates.ts(16,7): error TS2420: Class 'Bar3' incorrectly implements interface 'I'.
+@@ -20,7 +20,7 @@ implementingAnInterfaceExtendingClassWithPrivates.ts(21,7): error TS2420: Class
+     class Bar implements I { // error
+           ~~~
+ !!! error TS2420: Class 'Bar' incorrectly implements interface 'I'.
+-!!! error TS2420:   Type 'Bar' is missing the following properties from type 'I': x, y
++!!! error TS2420:   Type 'Bar' is missing the following properties from type 'I': y, x
+     }
+     
+     class Bar2 implements I { // error
+diff --git a/tests/baselines/reference/implementingAnInterfaceExtendingClassWithProtecteds.errors.txt b/tests/baselines/reference/implementingAnInterfaceExtendingClassWithProtecteds.errors.txt
+index 94c205616485c..b5fbbfe9c26f1 100644
+--- a/tests/baselines/reference/implementingAnInterfaceExtendingClassWithProtecteds.errors.txt
++++ b/tests/baselines/reference/implementingAnInterfaceExtendingClassWithProtecteds.errors.txt
+@@ -1,5 +1,5 @@
+ implementingAnInterfaceExtendingClassWithProtecteds.ts(9,7): error TS2420: Class 'Bar' incorrectly implements interface 'I'.
+-  Type 'Bar' is missing the following properties from type 'I': x, y
++  Type 'Bar' is missing the following properties from type 'I': y, x
+ implementingAnInterfaceExtendingClassWithProtecteds.ts(12,7): error TS2420: Class 'Bar2' incorrectly implements interface 'I'.
+   Property 'x' is missing in type 'Bar2' but required in type 'I'.
+ implementingAnInterfaceExtendingClassWithProtecteds.ts(16,7): error TS2420: Class 'Bar3' incorrectly implements interface 'I'.
+@@ -24,7 +24,7 @@ implementingAnInterfaceExtendingClassWithProtecteds.ts(29,7): error TS2420: Clas
+     class Bar implements I { // error
+           ~~~
+ !!! error TS2420: Class 'Bar' incorrectly implements interface 'I'.
+-!!! error TS2420:   Type 'Bar' is missing the following properties from type 'I': x, y
++!!! error TS2420:   Type 'Bar' is missing the following properties from type 'I': y, x
+     }
+     
+     class Bar2 implements I { // error
+diff --git a/tests/baselines/reference/intraExpressionInferencesJsx.types b/tests/baselines/reference/intraExpressionInferencesJsx.types
+index 4421e5c4b616d..54aaf495a218e 100644
+--- a/tests/baselines/reference/intraExpressionInferencesJsx.types
++++ b/tests/baselines/reference/intraExpressionInferencesJsx.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/invalidReturnStatements.errors.txt b/tests/baselines/reference/invalidReturnStatements.errors.txt
+index 2a1a60034e032..8074f33db87e1 100644
+--- a/tests/baselines/reference/invalidReturnStatements.errors.txt
++++ b/tests/baselines/reference/invalidReturnStatements.errors.txt
+@@ -2,7 +2,7 @@ invalidReturnStatements.ts(2,17): error TS2355: A function whose declared type i
+ invalidReturnStatements.ts(3,17): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+ invalidReturnStatements.ts(4,17): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+ invalidReturnStatements.ts(5,17): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+-invalidReturnStatements.ts(16,22): error TS2739: Type '{ id: number; }' is missing the following properties from type 'D': dispose, name
++invalidReturnStatements.ts(16,22): error TS2739: Type '{ id: number; }' is missing the following properties from type 'D': name, dispose
+ invalidReturnStatements.ts(18,22): error TS2741: Property 'name' is missing in type 'C' but required in type 'D'.
+ 
+ 
+@@ -32,7 +32,7 @@ invalidReturnStatements.ts(18,22): error TS2741: Property 'name' is missing in t
+     }
+     function fn10(): D { return { id: 12 }; } 
+                          ~~~~~~
+-!!! error TS2739: Type '{ id: number; }' is missing the following properties from type 'D': dispose, name
++!!! error TS2739: Type '{ id: number; }' is missing the following properties from type 'D': name, dispose
+     
+     function fn11(): D { return new C(); }
+                          ~~~~~~
+diff --git a/tests/baselines/reference/jsdocTypeTagCast.errors.txt b/tests/baselines/reference/jsdocTypeTagCast.errors.txt
+index b99dc8ea700ef..4e972729d9a49 100644
+--- a/tests/baselines/reference/jsdocTypeTagCast.errors.txt
++++ b/tests/baselines/reference/jsdocTypeTagCast.errors.txt
+@@ -2,7 +2,7 @@ b.js(4,20): error TS2352: Conversion of type 'number' to type 'string' may be a
+ b.js(45,23): error TS2352: Conversion of type 'SomeOther' to type 'SomeBase' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+   Property 'p' is missing in type 'SomeOther' but required in type 'SomeBase'.
+ b.js(49,26): error TS2352: Conversion of type 'SomeOther' to type 'SomeDerived' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+-  Type 'SomeOther' is missing the following properties from type 'SomeDerived': p, x
++  Type 'SomeOther' is missing the following properties from type 'SomeDerived': x, p
+ b.js(51,24): error TS2352: Conversion of type 'SomeDerived' to type 'SomeOther' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+   Property 'q' is missing in type 'SomeDerived' but required in type 'SomeOther'.
+ b.js(52,24): error TS2352: Conversion of type 'SomeBase' to type 'SomeOther' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+@@ -79,7 +79,7 @@ b.js(67,8): error TS2454: Variable 'numOrStr' is used before being assigned.
+     someDerived = /** @type {SomeDerived} */(someOther); // Error
+                              ~~~~~~~~~~~
+ !!! error TS2352: Conversion of type 'SomeOther' to type 'SomeDerived' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+-!!! error TS2352:   Type 'SomeOther' is missing the following properties from type 'SomeDerived': p, x
++!!! error TS2352:   Type 'SomeOther' is missing the following properties from type 'SomeDerived': x, p
+     
+     someOther = /** @type {SomeOther} */(someDerived); // Error
+                            ~~~~~~~~~
+diff --git a/tests/baselines/reference/jsxCallElaborationCheckNoCrash1.types b/tests/baselines/reference/jsxCallElaborationCheckNoCrash1.types
+index 105cbee8ab031..03a1aaae84634 100644
+--- a/tests/baselines/reference/jsxCallElaborationCheckNoCrash1.types
++++ b/tests/baselines/reference/jsxCallElaborationCheckNoCrash1.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxChildrenIndividualErrorElaborations.types b/tests/baselines/reference/jsxChildrenIndividualErrorElaborations.types
+index b5591bad3ac5d..45e7c9486365b 100644
+--- a/tests/baselines/reference/jsxChildrenIndividualErrorElaborations.types
++++ b/tests/baselines/reference/jsxChildrenIndividualErrorElaborations.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxComplexSignatureHasApplicabilityError.types b/tests/baselines/reference/jsxComplexSignatureHasApplicabilityError.types
+index 6b0250dafa83b..3117be3b91f5d 100644
+--- a/tests/baselines/reference/jsxComplexSignatureHasApplicabilityError.types
++++ b/tests/baselines/reference/jsxComplexSignatureHasApplicabilityError.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Type Count: 1,000
+-Instantiation count: 2,500
++Instantiation count: 1,000 -> 2,500
+ 
+ === jsxComplexSignatureHasApplicabilityError.tsx ===
+ /// <reference path="react16.d.ts" />
+diff --git a/tests/baselines/reference/jsxElementType.types b/tests/baselines/reference/jsxElementType.types
+index d45a1747b028d..60977590ce45b 100644
+--- a/tests/baselines/reference/jsxElementType.types
++++ b/tests/baselines/reference/jsxElementType.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxElementTypeLiteralWithGeneric.types b/tests/baselines/reference/jsxElementTypeLiteralWithGeneric.types
+index 89f0965e0afc8..af89fe8197892 100644
+--- a/tests/baselines/reference/jsxElementTypeLiteralWithGeneric.types
++++ b/tests/baselines/reference/jsxElementTypeLiteralWithGeneric.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxExcessPropsAndAssignability.types b/tests/baselines/reference/jsxExcessPropsAndAssignability.types
+index c1871036ab797..82aaa30d94f51 100644
+--- a/tests/baselines/reference/jsxExcessPropsAndAssignability.types
++++ b/tests/baselines/reference/jsxExcessPropsAndAssignability.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxIntrinsicElementsCompatability.types b/tests/baselines/reference/jsxIntrinsicElementsCompatability.types
+index 32a4fe7b35331..95c1f25caba6c 100644
+--- a/tests/baselines/reference/jsxIntrinsicElementsCompatability.types
++++ b/tests/baselines/reference/jsxIntrinsicElementsCompatability.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 100,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsx).types b/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsx).types
+index 276b99df459bf..7371ffcc13937 100644
+--- a/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsx).types
++++ b/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsx).types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsxdev).types b/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsxdev).types
+index 276b99df459bf..7371ffcc13937 100644
+--- a/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsxdev).types
++++ b/tests/baselines/reference/jsxJsxsCjsTransformNestedSelfClosingChild(jsx=react-jsxdev).types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/parenthesizedJSDocCastAtReturnStatement.types b/tests/baselines/reference/parenthesizedJSDocCastAtReturnStatement.types
+index e138921e963b2..61141eebd4c63 100644
+--- a/tests/baselines/reference/parenthesizedJSDocCastAtReturnStatement.types
++++ b/tests/baselines/reference/parenthesizedJSDocCastAtReturnStatement.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Type Count: 1,000
+-Instantiation count: 1,000
++Instantiation count: 2,500
+ 
+ === index.js ===
+ /** @type {Map<string, string | Set<string>>} */
+diff --git a/tests/baselines/reference/quickinfoVerbosityClass1.baseline b/tests/baselines/reference/quickinfoVerbosityClass1.baseline
+index 35ae37b1bf2e7..ba0fa94e7120b 100644
+--- a/tests/baselines/reference/quickinfoVerbosityClass1.baseline
++++ b/tests/baselines/reference/quickinfoVerbosityClass1.baseline
+@@ -77,10 +77,10 @@
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     a: string;
+-// |     bar(): void;
+ // |     b: boolean;
+ // |     baz(param: string | number): void;
++// |     a: string;
++// |     bar(): void;
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -116,9 +116,9 @@
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
++// |     foo(): Foo;
+ // |     bar(param: "foo"): void;
+ // |     baz(): Foo;
+-// |     foo(): Foo;
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -137,9 +137,9 @@
+ //           ^^^^^^
+ // | ----------------------------------------------------------------------
+ // | const noname: {
++// |     foo(): (Anonymous class);
+ // |     bar(param: "foo"): void;
+ // |     baz(): (Anonymous class);
+-// |     foo(): (Anonymous class);
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -157,9 +157,9 @@
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const k: {
++// |     foo(): klass;
+ // |     bar(param: "foo"): void;
+ // |     baz(): klass;
+-// |     foo(): klass;
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -922,7 +922,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "a",
++          "text": "b",
+           "kind": "propertyName"
+         },
+         {
+@@ -934,7 +934,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "string",
++          "text": "boolean",
+           "kind": "keyword"
+         },
+         {
+@@ -950,7 +950,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
++          "text": "baz",
+           "kind": "text"
+         },
+         {
+@@ -958,8 +958,8 @@
+           "kind": "punctuation"
+         },
+         {
+-          "text": ")",
+-          "kind": "punctuation"
++          "text": "param",
++          "kind": "parameterName"
+         },
+         {
+           "text": ":",
+@@ -970,24 +970,28 @@
+           "kind": "space"
+         },
+         {
+-          "text": "void",
++          "text": "string",
+           "kind": "keyword"
+         },
+         {
+-          "text": ";",
+-          "kind": "punctuation"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": "\n",
+-          "kind": "lineBreak"
++          "text": "|",
++          "kind": "punctuation"
+         },
+         {
+-          "text": "    ",
++          "text": " ",
+           "kind": "space"
+         },
+         {
+-          "text": "b",
+-          "kind": "propertyName"
++          "text": "number",
++          "kind": "keyword"
++        },
++        {
++          "text": ")",
++          "kind": "punctuation"
+         },
+         {
+           "text": ":",
+@@ -998,7 +1002,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "boolean",
++          "text": "void",
+           "kind": "keyword"
+         },
+         {
+@@ -1014,16 +1018,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "baz",
+-          "kind": "text"
+-        },
+-        {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "param",
+-          "kind": "parameterName"
++          "text": "a",
++          "kind": "propertyName"
+         },
+         {
+           "text": ":",
+@@ -1038,20 +1034,24 @@
+           "kind": "keyword"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
++          "text": ";",
++          "kind": "punctuation"
+         },
+         {
+-          "text": "|",
+-          "kind": "punctuation"
++          "text": "\n",
++          "kind": "lineBreak"
+         },
+         {
+-          "text": " ",
++          "text": "    ",
+           "kind": "space"
+         },
+         {
+-          "text": "number",
+-          "kind": "keyword"
++          "text": "bar",
++          "kind": "text"
++        },
++        {
++          "text": "(",
++          "kind": "punctuation"
+         },
+         {
+           "text": ")",
+@@ -1386,29 +1386,13 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
++          "text": "foo",
+           "kind": "text"
+         },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
+-        {
+-          "text": "param",
+-          "kind": "parameterName"
+-        },
+-        {
+-          "text": ":",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "\"foo\"",
+-          "kind": "stringLiteral"
+-        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+@@ -1422,8 +1406,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "void",
+-          "kind": "keyword"
++          "text": "Foo",
++          "kind": "className"
+         },
+         {
+           "text": ";",
+@@ -1438,13 +1422,29 @@
+           "kind": "space"
+         },
+         {
+-          "text": "baz",
++          "text": "bar",
+           "kind": "text"
+         },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
++        {
++          "text": "param",
++          "kind": "parameterName"
++        },
++        {
++          "text": ":",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
++          "kind": "space"
++        },
++        {
++          "text": "\"foo\"",
++          "kind": "stringLiteral"
++        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+@@ -1458,8 +1458,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "Foo",
+-          "kind": "className"
++          "text": "void",
++          "kind": "keyword"
+         },
+         {
+           "text": ";",
+@@ -1474,7 +1474,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
++          "text": "baz",
+           "kind": "text"
+         },
+         {
+@@ -1606,29 +1606,13 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
++          "text": "foo",
+           "kind": "text"
+         },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
+-        {
+-          "text": "param",
+-          "kind": "parameterName"
+-        },
+-        {
+-          "text": ":",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "\"foo\"",
+-          "kind": "stringLiteral"
+-        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+@@ -1642,8 +1626,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "void",
+-          "kind": "keyword"
++          "text": "(Anonymous class)",
++          "kind": "className"
+         },
+         {
+           "text": ";",
+@@ -1658,13 +1642,29 @@
+           "kind": "space"
+         },
+         {
+-          "text": "baz",
++          "text": "bar",
+           "kind": "text"
+         },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
++        {
++          "text": "param",
++          "kind": "parameterName"
++        },
++        {
++          "text": ":",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
++          "kind": "space"
++        },
++        {
++          "text": "\"foo\"",
++          "kind": "stringLiteral"
++        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+@@ -1678,8 +1678,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "(Anonymous class)",
+-          "kind": "className"
++          "text": "void",
++          "kind": "keyword"
+         },
+         {
+           "text": ";",
+@@ -1694,7 +1694,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
++          "text": "baz",
+           "kind": "text"
+         },
+         {
+@@ -1826,29 +1826,13 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
++          "text": "foo",
+           "kind": "text"
+         },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
+-        {
+-          "text": "param",
+-          "kind": "parameterName"
+-        },
+-        {
+-          "text": ":",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "\"foo\"",
+-          "kind": "stringLiteral"
+-        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+@@ -1862,8 +1846,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "void",
+-          "kind": "keyword"
++          "text": "klass",
++          "kind": "className"
+         },
+         {
+           "text": ";",
+@@ -1878,13 +1862,29 @@
+           "kind": "space"
+         },
+         {
+-          "text": "baz",
++          "text": "bar",
+           "kind": "text"
+         },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
++        {
++          "text": "param",
++          "kind": "parameterName"
++        },
++        {
++          "text": ":",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
++          "kind": "space"
++        },
++        {
++          "text": "\"foo\"",
++          "kind": "stringLiteral"
++        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+@@ -1898,8 +1898,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "klass",
+-          "kind": "className"
++          "text": "void",
++          "kind": "keyword"
+         },
+         {
+           "text": ";",
+@@ -1914,7 +1914,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
++          "text": "baz",
+           "kind": "text"
+         },
+         {
+diff --git a/tests/baselines/reference/quickinfoVerbosityInterface1.baseline b/tests/baselines/reference/quickinfoVerbosityInterface1.baseline
+index e86db61702414..7d0b66bc6b396 100644
+--- a/tests/baselines/reference/quickinfoVerbosityInterface1.baseline
++++ b/tests/baselines/reference/quickinfoVerbosityInterface1.baseline
+@@ -29,8 +29,8 @@
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     b: "b" | "d";
+ // |     a: "a" | "c";
++// |     b: "b" | "d";
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -57,31 +57,31 @@
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     bar(b: "b" | "d"): string;
+ // |     a: "a" | "c";
+ // |     foo: (a: {
+ // |         param: "a" | "c";
+ // |     }) => number;
++// |     bar(b: "b" | "d"): string;
+ // | }
+ // | (verbosity level: 3)
+ // | ----------------------------------------------------------------------
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     bar(b: "b" | "d"): string;
+ // |     a: "a" | "c";
+ // |     foo: (a: {
+ // |         param: FooType;
+ // |     }) => number;
++// |     bar(b: "b" | "d"): string;
+ // | }
+ // | (verbosity level: 2)
+ // | ----------------------------------------------------------------------
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     bar(b: BarParam): string;
+ // |     a: FooType;
+ // |     foo: (a: FooParam) => number;
++// |     bar(b: BarParam): string;
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -106,22 +106,22 @@
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     bar(b: {
+-// |         param: "a" | "c";
+-// |     }): string;
+ // |     a: "a" | "c";
+ // |     foo: (a: {
+ // |         param: "a" | "c";
+ // |     }) => number;
++// |     bar(b: {
++// |         param: "a" | "c";
++// |     }): string;
+ // | }
+ // | (verbosity level: 2)
+ // | ----------------------------------------------------------------------
+ //           ^
+ // | ----------------------------------------------------------------------
+ // | const f: {
+-// |     bar(b: FooParam): string;
+ // |     a: "a" | "c";
+ // |     foo: (a: FooParam) => number;
++// |     bar(b: FooParam): string;
+ // | }
+ // | (verbosity level: 1)
+ // | ----------------------------------------------------------------------
+@@ -423,7 +423,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "b",
++          "text": "a",
+           "kind": "propertyName"
+         },
+         {
+@@ -435,7 +435,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"b\"",
++          "text": "\"a\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -451,7 +451,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"d\"",
++          "text": "\"c\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -467,7 +467,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "a",
++          "text": "b",
+           "kind": "propertyName"
+         },
+         {
+@@ -479,7 +479,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"a\"",
++          "text": "\"b\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -495,7 +495,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"c\"",
++          "text": "\"d\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -607,16 +607,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
+-          "kind": "text"
+-        },
+-        {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "b",
+-          "kind": "parameterName"
++          "text": "a",
++          "kind": "propertyName"
+         },
+         {
+           "text": ":",
+@@ -627,40 +619,40 @@
+           "kind": "space"
+         },
+         {
+-          "text": "BarParam",
++          "text": "FooType",
+           "kind": "aliasName"
+         },
+         {
+-          "text": ")",
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+-          "text": ":",
+-          "kind": "punctuation"
++          "text": "\n",
++          "kind": "lineBreak"
+         },
+         {
+-          "text": " ",
++          "text": "    ",
+           "kind": "space"
+         },
+         {
+-          "text": "string",
+-          "kind": "keyword"
++          "text": "foo",
++          "kind": "propertyName"
+         },
+         {
+-          "text": ";",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "\n",
+-          "kind": "lineBreak"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": "    ",
+-          "kind": "space"
++          "text": "(",
++          "kind": "punctuation"
+         },
+         {
+           "text": "a",
+-          "kind": "propertyName"
++          "kind": "parameterName"
+         },
+         {
+           "text": ":",
+@@ -671,39 +663,51 @@
+           "kind": "space"
+         },
+         {
+-          "text": "FooType",
+-          "kind": "aliasName"
++          "text": "FooParam",
++          "kind": "interfaceName"
+         },
+         {
+-          "text": ";",
++          "text": ")",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "\n",
+-          "kind": "lineBreak"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": "    ",
++          "text": "=>",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
+-          "kind": "propertyName"
++          "text": "number",
++          "kind": "keyword"
+         },
+         {
+-          "text": ":",
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
++          "text": "\n",
++          "kind": "lineBreak"
++        },
++        {
++          "text": "    ",
+           "kind": "space"
+         },
++        {
++          "text": "bar",
++          "kind": "text"
++        },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "a",
++          "text": "b",
+           "kind": "parameterName"
+         },
+         {
+@@ -715,19 +719,15 @@
+           "kind": "space"
+         },
+         {
+-          "text": "FooParam",
+-          "kind": "interfaceName"
++          "text": "BarParam",
++          "kind": "aliasName"
+         },
+         {
+           "text": ")",
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "=>",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -735,7 +735,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "number",
++          "text": "string",
+           "kind": "keyword"
+         },
+         {
+@@ -803,16 +803,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
+-          "kind": "text"
+-        },
+-        {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "b",
+-          "kind": "parameterName"
++          "text": "a",
++          "kind": "propertyName"
+         },
+         {
+           "text": ":",
+@@ -823,7 +815,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"b\"",
++          "text": "\"a\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -839,40 +831,40 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"d\"",
++          "text": "\"c\"",
+           "kind": "stringLiteral"
+         },
+         {
+-          "text": ")",
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+-          "text": ":",
+-          "kind": "punctuation"
++          "text": "\n",
++          "kind": "lineBreak"
+         },
+         {
+-          "text": " ",
++          "text": "    ",
+           "kind": "space"
+         },
+         {
+-          "text": "string",
+-          "kind": "keyword"
++          "text": "foo",
++          "kind": "propertyName"
+         },
+         {
+-          "text": ";",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "\n",
+-          "kind": "lineBreak"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": "    ",
+-          "kind": "space"
++          "text": "(",
++          "kind": "punctuation"
+         },
+         {
+           "text": "a",
+-          "kind": "propertyName"
++          "kind": "parameterName"
+         },
+         {
+           "text": ":",
+@@ -883,15 +875,23 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"a\"",
+-          "kind": "stringLiteral"
++          "text": "{",
++          "kind": "punctuation"
+         },
+         {
+-          "text": " ",
++          "text": "\n",
++          "kind": "lineBreak"
++        },
++        {
++          "text": "        ",
+           "kind": "space"
+         },
+         {
+-          "text": "|",
++          "text": "param",
++          "kind": "propertyName"
++        },
++        {
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -899,8 +899,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"c\"",
+-          "kind": "stringLiteral"
++          "text": "FooType",
++          "kind": "aliasName"
+         },
+         {
+           "text": ";",
+@@ -915,11 +915,11 @@
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
+-          "kind": "propertyName"
++          "text": "}",
++          "kind": "punctuation"
+         },
+         {
+-          "text": ":",
++          "text": ")",
+           "kind": "punctuation"
+         },
+         {
+@@ -927,15 +927,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "a",
+-          "kind": "parameterName"
+-        },
+-        {
+-          "text": ":",
++          "text": "=>",
+           "kind": "punctuation"
+         },
+         {
+@@ -943,7 +935,11 @@
+           "kind": "space"
+         },
+         {
+-          "text": "{",
++          "text": "number",
++          "kind": "keyword"
++        },
++        {
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+@@ -951,12 +947,20 @@
+           "kind": "lineBreak"
+         },
+         {
+-          "text": "        ",
++          "text": "    ",
+           "kind": "space"
+         },
+         {
+-          "text": "param",
+-          "kind": "propertyName"
++          "text": "bar",
++          "kind": "text"
++        },
++        {
++          "text": "(",
++          "kind": "punctuation"
++        },
++        {
++          "text": "b",
++          "kind": "parameterName"
+         },
+         {
+           "text": ":",
+@@ -967,35 +971,31 @@
+           "kind": "space"
+         },
+         {
+-          "text": "FooType",
+-          "kind": "aliasName"
++          "text": "\"b\"",
++          "kind": "stringLiteral"
+         },
+         {
+-          "text": ";",
+-          "kind": "punctuation"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": "\n",
+-          "kind": "lineBreak"
++          "text": "|",
++          "kind": "punctuation"
+         },
+         {
+-          "text": "    ",
++          "text": " ",
+           "kind": "space"
+         },
+         {
+-          "text": "}",
+-          "kind": "punctuation"
++          "text": "\"d\"",
++          "kind": "stringLiteral"
+         },
+         {
+           "text": ")",
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "=>",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -1003,7 +1003,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "number",
++          "text": "string",
+           "kind": "keyword"
+         },
+         {
+@@ -1071,16 +1071,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
+-          "kind": "text"
+-        },
+-        {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "b",
+-          "kind": "parameterName"
++          "text": "a",
++          "kind": "propertyName"
+         },
+         {
+           "text": ":",
+@@ -1091,7 +1083,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"b\"",
++          "text": "\"a\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -1107,27 +1099,51 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"d\"",
++          "text": "\"c\"",
+           "kind": "stringLiteral"
+         },
+         {
+-          "text": ")",
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+-          "text": ":",
+-          "kind": "punctuation"
++          "text": "\n",
++          "kind": "lineBreak"
++        },
++        {
++          "text": "    ",
++          "kind": "space"
++        },
++        {
++          "text": "foo",
++          "kind": "propertyName"
++        },
++        {
++          "text": ":",
++          "kind": "punctuation"
+         },
+         {
+           "text": " ",
+           "kind": "space"
+         },
+         {
+-          "text": "string",
+-          "kind": "keyword"
++          "text": "(",
++          "kind": "punctuation"
+         },
+         {
+-          "text": ";",
++          "text": "a",
++          "kind": "parameterName"
++        },
++        {
++          "text": ":",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
++          "kind": "space"
++        },
++        {
++          "text": "{",
+           "kind": "punctuation"
+         },
+         {
+@@ -1135,11 +1151,11 @@
+           "kind": "lineBreak"
+         },
+         {
+-          "text": "    ",
++          "text": "        ",
+           "kind": "space"
+         },
+         {
+-          "text": "a",
++          "text": "param",
+           "kind": "propertyName"
+         },
+         {
+@@ -1183,11 +1199,11 @@
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
+-          "kind": "propertyName"
++          "text": "}",
++          "kind": "punctuation"
+         },
+         {
+-          "text": ":",
++          "text": ")",
+           "kind": "punctuation"
+         },
+         {
+@@ -1195,15 +1211,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "a",
+-          "kind": "parameterName"
+-        },
+-        {
+-          "text": ":",
++          "text": "=>",
+           "kind": "punctuation"
+         },
+         {
+@@ -1211,7 +1219,11 @@
+           "kind": "space"
+         },
+         {
+-          "text": "{",
++          "text": "number",
++          "kind": "keyword"
++        },
++        {
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+@@ -1219,12 +1231,20 @@
+           "kind": "lineBreak"
+         },
+         {
+-          "text": "        ",
++          "text": "    ",
+           "kind": "space"
+         },
+         {
+-          "text": "param",
+-          "kind": "propertyName"
++          "text": "bar",
++          "kind": "text"
++        },
++        {
++          "text": "(",
++          "kind": "punctuation"
++        },
++        {
++          "text": "b",
++          "kind": "parameterName"
+         },
+         {
+           "text": ":",
+@@ -1235,7 +1255,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"a\"",
++          "text": "\"b\"",
+           "kind": "stringLiteral"
+         },
+         {
+@@ -1251,35 +1271,15 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"c\"",
++          "text": "\"d\"",
+           "kind": "stringLiteral"
+         },
+-        {
+-          "text": ";",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "\n",
+-          "kind": "lineBreak"
+-        },
+-        {
+-          "text": "    ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "}",
+-          "kind": "punctuation"
+-        },
+         {
+           "text": ")",
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "=>",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -1287,7 +1287,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "number",
++          "text": "string",
+           "kind": "keyword"
+         },
+         {
+@@ -1399,16 +1399,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
+-          "kind": "text"
+-        },
+-        {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "b",
+-          "kind": "parameterName"
++          "text": "a",
++          "kind": "propertyName"
+         },
+         {
+           "text": ":",
+@@ -1419,15 +1411,15 @@
+           "kind": "space"
+         },
+         {
+-          "text": "FooParam",
+-          "kind": "interfaceName"
++          "text": "\"a\"",
++          "kind": "stringLiteral"
+         },
+         {
+-          "text": ")",
+-          "kind": "punctuation"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": ":",
++          "text": "|",
+           "kind": "punctuation"
+         },
+         {
+@@ -1435,8 +1427,8 @@
+           "kind": "space"
+         },
+         {
+-          "text": "string",
+-          "kind": "keyword"
++          "text": "\"c\"",
++          "kind": "stringLiteral"
+         },
+         {
+           "text": ";",
+@@ -1451,7 +1443,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "a",
++          "text": "foo",
+           "kind": "propertyName"
+         },
+         {
+@@ -1463,15 +1455,15 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"a\"",
+-          "kind": "stringLiteral"
++          "text": "(",
++          "kind": "punctuation"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
++          "text": "a",
++          "kind": "parameterName"
+         },
+         {
+-          "text": "|",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -1479,39 +1471,51 @@
+           "kind": "space"
+         },
+         {
+-          "text": "\"c\"",
+-          "kind": "stringLiteral"
++          "text": "FooParam",
++          "kind": "interfaceName"
+         },
+         {
+-          "text": ";",
++          "text": ")",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "\n",
+-          "kind": "lineBreak"
++          "text": " ",
++          "kind": "space"
+         },
+         {
+-          "text": "    ",
++          "text": "=>",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
+-          "kind": "propertyName"
++          "text": "number",
++          "kind": "keyword"
+         },
+         {
+-          "text": ":",
++          "text": ";",
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
++          "text": "\n",
++          "kind": "lineBreak"
++        },
++        {
++          "text": "    ",
+           "kind": "space"
+         },
++        {
++          "text": "bar",
++          "kind": "text"
++        },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "a",
++          "text": "b",
+           "kind": "parameterName"
+         },
+         {
+@@ -1531,11 +1535,7 @@
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "=>",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -1543,7 +1543,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "number",
++          "text": "string",
+           "kind": "keyword"
+         },
+         {
+@@ -1611,39 +1611,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "bar",
+-          "kind": "text"
+-        },
+-        {
+-          "text": "(",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "b",
+-          "kind": "parameterName"
+-        },
+-        {
+-          "text": ":",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "{",
+-          "kind": "punctuation"
+-        },
+-        {
+-          "text": "\n",
+-          "kind": "lineBreak"
+-        },
+-        {
+-          "text": "        ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "param",
++          "text": "a",
+           "kind": "propertyName"
+         },
+         {
+@@ -1687,13 +1655,25 @@
+           "kind": "space"
+         },
+         {
+-          "text": "}",
++          "text": "foo",
++          "kind": "propertyName"
++        },
++        {
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+-          "text": ")",
++          "text": " ",
++          "kind": "space"
++        },
++        {
++          "text": "(",
+           "kind": "punctuation"
+         },
++        {
++          "text": "a",
++          "kind": "parameterName"
++        },
+         {
+           "text": ":",
+           "kind": "punctuation"
+@@ -1703,11 +1683,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "string",
+-          "kind": "keyword"
+-        },
+-        {
+-          "text": ";",
++          "text": "{",
+           "kind": "punctuation"
+         },
+         {
+@@ -1715,11 +1691,11 @@
+           "kind": "lineBreak"
+         },
+         {
+-          "text": "    ",
++          "text": "        ",
+           "kind": "space"
+         },
+         {
+-          "text": "a",
++          "text": "param",
+           "kind": "propertyName"
+         },
+         {
+@@ -1763,23 +1739,51 @@
+           "kind": "space"
+         },
+         {
+-          "text": "foo",
+-          "kind": "propertyName"
++          "text": "}",
++          "kind": "punctuation"
+         },
+         {
+-          "text": ":",
++          "text": ")",
++          "kind": "punctuation"
++        },
++        {
++          "text": " ",
++          "kind": "space"
++        },
++        {
++          "text": "=>",
+           "kind": "punctuation"
+         },
+         {
+           "text": " ",
+           "kind": "space"
+         },
++        {
++          "text": "number",
++          "kind": "keyword"
++        },
++        {
++          "text": ";",
++          "kind": "punctuation"
++        },
++        {
++          "text": "\n",
++          "kind": "lineBreak"
++        },
++        {
++          "text": "    ",
++          "kind": "space"
++        },
++        {
++          "text": "bar",
++          "kind": "text"
++        },
+         {
+           "text": "(",
+           "kind": "punctuation"
+         },
+         {
+-          "text": "a",
++          "text": "b",
+           "kind": "parameterName"
+         },
+         {
+@@ -1855,11 +1859,7 @@
+           "kind": "punctuation"
+         },
+         {
+-          "text": " ",
+-          "kind": "space"
+-        },
+-        {
+-          "text": "=>",
++          "text": ":",
+           "kind": "punctuation"
+         },
+         {
+@@ -1867,7 +1867,7 @@
+           "kind": "space"
+         },
+         {
+-          "text": "number",
++          "text": "string",
+           "kind": "keyword"
+         },
+         {
+diff --git a/tests/baselines/reference/reactHOCSpreadprops.types b/tests/baselines/reference/reactHOCSpreadprops.types
+index d3109b04be1d0..a7fb1094c1580 100644
+--- a/tests/baselines/reference/reactHOCSpreadprops.types
++++ b/tests/baselines/reference/reactHOCSpreadprops.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/reactReadonlyHOCAssignabilityReal.types b/tests/baselines/reference/reactReadonlyHOCAssignabilityReal.types
+index be3c88298c0a1..d1e78014fb51f 100644
+--- a/tests/baselines/reference/reactReadonlyHOCAssignabilityReal.types
++++ b/tests/baselines/reference/reactReadonlyHOCAssignabilityReal.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/returnConditionalExpressionJSDocCast.types b/tests/baselines/reference/returnConditionalExpressionJSDocCast.types
+index afbd69e2a4616..4b98f032cb8e9 100644
+--- a/tests/baselines/reference/returnConditionalExpressionJSDocCast.types
++++ b/tests/baselines/reference/returnConditionalExpressionJSDocCast.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Type Count: 1,000
+-Instantiation count: 1,000
++Instantiation count: 2,500
+ 
+ === file.js ===
+ // Don't peek into conditional return expression if it's wrapped in a cast
+diff --git a/tests/baselines/reference/returnTypePredicateIsInstantiateInContextOfTarget.types b/tests/baselines/reference/returnTypePredicateIsInstantiateInContextOfTarget.types
+index 5b173a6a340d1..c078dee14317f 100644
+--- a/tests/baselines/reference/returnTypePredicateIsInstantiateInContextOfTarget.types
++++ b/tests/baselines/reference/returnTypePredicateIsInstantiateInContextOfTarget.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/tsxInvokeComponentType.types b/tests/baselines/reference/tsxInvokeComponentType.types
+index f7d5bcf2c8afc..a48c21e2c7bd0 100644
+--- a/tests/baselines/reference/tsxInvokeComponentType.types
++++ b/tests/baselines/reference/tsxInvokeComponentType.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/tsxNotUsingApparentTypeOfSFC.types b/tests/baselines/reference/tsxNotUsingApparentTypeOfSFC.types
+index de9b6605bc91f..2b7d4d8853f52 100644
+--- a/tests/baselines/reference/tsxNotUsingApparentTypeOfSFC.types
++++ b/tests/baselines/reference/tsxNotUsingApparentTypeOfSFC.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/tsxReactPropsInferenceSucceedsOnIntersections.types b/tests/baselines/reference/tsxReactPropsInferenceSucceedsOnIntersections.types
+index 41d18ecedca6d..7cd171427c738 100644
+--- a/tests/baselines/reference/tsxReactPropsInferenceSucceedsOnIntersections.types
++++ b/tests/baselines/reference/tsxReactPropsInferenceSucceedsOnIntersections.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/baselines/reference/typeAssertions.errors.txt b/tests/baselines/reference/typeAssertions.errors.txt
+index 353e324db2e7e..1e4a84b919aa2 100644
+--- a/tests/baselines/reference/typeAssertions.errors.txt
++++ b/tests/baselines/reference/typeAssertions.errors.txt
+@@ -2,7 +2,7 @@ typeAssertions.ts(5,9): error TS2558: Expected 0 type arguments, but got 1.
+ typeAssertions.ts(31,12): error TS2352: Conversion of type 'SomeOther' to type 'SomeBase' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+   Property 'p' is missing in type 'SomeOther' but required in type 'SomeBase'.
+ typeAssertions.ts(35,15): error TS2352: Conversion of type 'SomeOther' to type 'SomeDerived' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+-  Type 'SomeOther' is missing the following properties from type 'SomeDerived': p, x
++  Type 'SomeOther' is missing the following properties from type 'SomeDerived': x, p
+ typeAssertions.ts(37,13): error TS2352: Conversion of type 'SomeDerived' to type 'SomeOther' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+   Property 'q' is missing in type 'SomeDerived' but required in type 'SomeOther'.
+ typeAssertions.ts(38,13): error TS2352: Conversion of type 'SomeBase' to type 'SomeOther' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+@@ -67,7 +67,7 @@ typeAssertions.ts(48,50): error TS1128: Declaration or statement expected.
+     someDerived = <SomeDerived>someOther; // Error
+                   ~~~~~~~~~~~~~~~~~~~~~~
+ !!! error TS2352: Conversion of type 'SomeOther' to type 'SomeDerived' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+-!!! error TS2352:   Type 'SomeOther' is missing the following properties from type 'SomeDerived': p, x
++!!! error TS2352:   Type 'SomeOther' is missing the following properties from type 'SomeDerived': x, p
+     
+     someOther = <SomeOther>someDerived; // Error
+                 ~~~~~~~~~~~~~~~~~~~~~~
+diff --git a/tests/baselines/reference/typeInferenceWithExcessPropertiesJsx.types b/tests/baselines/reference/typeInferenceWithExcessPropertiesJsx.types
+index 0452937307440..94fdcef1a8b73 100644
+--- a/tests/baselines/reference/typeInferenceWithExcessPropertiesJsx.types
++++ b/tests/baselines/reference/typeInferenceWithExcessPropertiesJsx.types
+@@ -2,7 +2,7 @@
+ 
+ === Performance Stats ===
+ Assignability cache: 2,500
+-Type Count: 5,000
++Type Count: 10,000
+ Instantiation count: 50,000
+ Symbol count: 50,000
+ 
+diff --git a/tests/cases/fourslash/codefixClassImplementInterface_omit.ts b/tests/cases/fourslash/codefixClassImplementInterface_omit.ts
+index c7267feee57ef..f4ff82028d441 100644
+--- a/tests/cases/fourslash/codefixClassImplementInterface_omit.ts
++++ b/tests/cases/fourslash/codefixClassImplementInterface_omit.ts
+@@ -24,7 +24,7 @@ interface Two extends Omit<One, "a"> {
+ }
+ 
+ class TwoStore implements Two {
+-    b: string;
+     c: boolean;
++    b: string;
+ }`,
+ });

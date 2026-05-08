@@ -1,0 +1,52 @@
+From e07c26857c419a5c065f030ae932fe758ec4aeea Mon Sep 17 00:00:00 2001
+From: Alessandro Colace <ale.colace@gmail.com>
+Date: Fri, 1 May 2026 18:24:13 +0200
+Subject: [PATCH] fix(v4): allow dynamic `.catch()` under `unrepresentable:
+ "any"` (#5273)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`catchProcessor` evaluates `def.catchValue(undefined)` to derive a static `default`. When the callback inspects its `ctx` argument it throws, and `z.toJSONSchema()` surfaced that as a hard error even when the caller opted into lossy conversion.
+
+Gate the rethrow on `unrepresentable === "throw"`. Under `"any"`, skip the `default` and fall through with the inner schema (already populated by the preceding `process(def.innerType)` call) — same passthrough shape `pipe(transform, ...)` produces today.
+
+Default behaviour is unchanged. Adds a snapshot test for the new path.
+---
+ packages/zod/src/v4/classic/tests/to-json-schema.test.ts | 6 ++++++
+ packages/zod/src/v4/core/json-schema-processors.ts       | 5 ++++-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/packages/zod/src/v4/classic/tests/to-json-schema.test.ts b/packages/zod/src/v4/classic/tests/to-json-schema.test.ts
+index 88fb4e2c31..658702e061 100644
+--- a/packages/zod/src/v4/classic/tests/to-json-schema.test.ts
++++ b/packages/zod/src/v4/classic/tests/to-json-schema.test.ts
+@@ -325,6 +325,12 @@ describe("toJSONSchema", () => {
+     // Dynamic catch values
+     const dynamicCatchSchema = z.string().catch((ctx) => `${ctx.issues.length}`);
+     expect(() => z.toJSONSchema(dynamicCatchSchema)).toThrow("Dynamic catch values are not supported in JSON Schema");
++    expect(z.toJSONSchema(dynamicCatchSchema, { unrepresentable: "any" })).toMatchInlineSnapshot(`
++      {
++        "$schema": "https://json-schema.org/draft/2020-12/schema",
++        "type": "string",
++      }
++    `);
+   });
+ 
+   test("string formats", () => {
+diff --git a/packages/zod/src/v4/core/json-schema-processors.ts b/packages/zod/src/v4/core/json-schema-processors.ts
+index 8d2790e15f..0680fc7c65 100644
+--- a/packages/zod/src/v4/core/json-schema-processors.ts
++++ b/packages/zod/src/v4/core/json-schema-processors.ts
+@@ -518,7 +518,10 @@ export const catchProcessor: Processor<schemas.$ZodCatch> = (schema, ctx, json,
+   try {
+     catchValue = def.catchValue(undefined as any);
+   } catch {
+-    throw new Error("Dynamic catch values are not supported in JSON Schema");
++    if (ctx.unrepresentable === "throw") {
++      throw new Error("Dynamic catch values are not supported in JSON Schema");
++    }
++    return;
+   }
+   json.default = catchValue;
+ };

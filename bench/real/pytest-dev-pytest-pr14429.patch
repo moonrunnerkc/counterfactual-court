@@ -1,0 +1,168 @@
+From 4cd4ca750db56a77e0498d5764e68dce533b261d Mon Sep 17 00:00:00 2001
+From: EternalRights <3147268827@qq.com>
+Date: Thu, 30 Apr 2026 01:01:50 +0800
+Subject: [PATCH 1/4] fix Argument.__repr__ crash when _action is not
+ initialized
+
+---
+ changelog/13817.bugfix.rst       |  1 +
+ src/_pytest/config/argparsing.py |  5 ++++-
+ testing/test_parseopt.py         | 25 +++++++++++++++++++++++++
+ 3 files changed, 30 insertions(+), 1 deletion(-)
+ create mode 100644 changelog/13817.bugfix.rst
+
+diff --git a/changelog/13817.bugfix.rst b/changelog/13817.bugfix.rst
+new file mode 100644
+index 00000000000..438706b0033
+--- /dev/null
++++ b/changelog/13817.bugfix.rst
+@@ -0,0 +1 @@
++Fixed a secondary `AttributeError` masking the original error when an option argument fails to initialize.
+\ No newline at end of file
+diff --git a/src/_pytest/config/argparsing.py b/src/_pytest/config/argparsing.py
+index 4536709134b..f2ec53374af 100644
+--- a/src/_pytest/config/argparsing.py
++++ b/src/_pytest/config/argparsing.py
+@@ -306,10 +306,13 @@ def type(self) -> Any | None:
+         return self._action.type
+ 
+     def __repr__(self) -> str:
++        action = getattr(self, "_action", None)
++        if action is None:
++            return "Argument(<uninitialized>)"
+         args: list[str] = []
+         args += ["opts: " + repr(self.names())]
+         args += ["dest: " + repr(self.dest)]
+-        if self._action.type:
++        if action.type:
+             args += ["type: " + repr(self.type)]
+         args += ["default: " + repr(self.default)]
+         return "Argument({})".format(", ".join(args))
+diff --git a/testing/test_parseopt.py b/testing/test_parseopt.py
+index f56deed8b5d..8c802617011 100644
+--- a/testing/test_parseopt.py
++++ b/testing/test_parseopt.py
+@@ -341,3 +341,28 @@ def test_argcomplete(pytester: Pytester, monkeypatch: MonkeyPatch) -> None:
+     monkeypatch.setenv("COMP_POINT", str(len("pytest " + arg)))
+     result = pytester.run("bash", str(script), arg)
+     result.stdout.fnmatch_lines(["test_argcomplete", "test_argcomplete.d/"])
++
++
++def test_argument_repr_uninitialized() -> None:
++    """Argument.__repr__ should not crash if _action is not set yet."""
++    arg = parseopt.Argument.__new__(parseopt.Argument)
++    result = repr(arg)
++    assert result == "Argument(<uninitialized>)"
++
++
++def test_argument_repr_initialized(parser: parseopt.Parser) -> None:
++    """Argument.__repr__ works normally when properly initialized."""
++    parser.addoption("--myflag", dest="myflag", help="test flag")
++    option = parser._anonymous.options[-1]
++    result = repr(option)
++    assert "opts:" in result
++    assert "dest:" in result
++
++
++def test_argument_repr_with_type(parser: parseopt.Parser) -> None:
++    """Argument.__repr__ includes type when set."""
++    parser.addoption("--count", type=int, dest="count", help="count")
++    option = parser._anonymous.options[-1]
++    result = repr(option)
++    assert "type:" in result
++    assert "int" in result
+
+From e786bca51096b60427b1a2503b2ff62b11976c05 Mon Sep 17 00:00:00 2001
+From: "pre-commit-ci[bot]"
+ <66853113+pre-commit-ci[bot]@users.noreply.github.com>
+Date: Wed, 29 Apr 2026 17:26:18 +0000
+Subject: [PATCH 2/4] [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+---
+ changelog/13817.bugfix.rst | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/changelog/13817.bugfix.rst b/changelog/13817.bugfix.rst
+index 438706b0033..08c9a6a53c3 100644
+--- a/changelog/13817.bugfix.rst
++++ b/changelog/13817.bugfix.rst
+@@ -1 +1 @@
+-Fixed a secondary `AttributeError` masking the original error when an option argument fails to initialize.
+\ No newline at end of file
++Fixed a secondary `AttributeError` masking the original error when an option argument fails to initialize.
+
+From e54ba72b5caee1f7b426bd313fa8616954b1a8ae Mon Sep 17 00:00:00 2001
+From: EternalRights <EternalRights@users.noreply.github.com>
+Date: Thu, 7 May 2026 23:03:57 +0800
+Subject: [PATCH 3/4] Merge repr tests per review: combine
+ initialized/with_type, use exact string matching
+
+Per nicoddemus review feedback:
+- Merge test_argument_repr_with_type into test_argument_repr_initialized
+  as they test the same construction path
+- Switch from 'in' checks to exact == string matching
+- Cover both 'without type' and 'with type' branches in one test
+---
+ testing/test_parseopt.py | 18 ++++++------------
+ 1 file changed, 6 insertions(+), 12 deletions(-)
+
+diff --git a/testing/test_parseopt.py b/testing/test_parseopt.py
+index 8c802617011..e655f454a85 100644
+--- a/testing/test_parseopt.py
++++ b/testing/test_parseopt.py
+@@ -346,23 +346,17 @@ def test_argcomplete(pytester: Pytester, monkeypatch: MonkeyPatch) -> None:
+ def test_argument_repr_uninitialized() -> None:
+     """Argument.__repr__ should not crash if _action is not set yet."""
+     arg = parseopt.Argument.__new__(parseopt.Argument)
+-    result = repr(arg)
+-    assert result == "Argument(<uninitialized>)"
++    assert repr(arg) == "Argument(<uninitialized>)"
+ 
+ 
+ def test_argument_repr_initialized(parser: parseopt.Parser) -> None:
+-    """Argument.__repr__ works normally when properly initialized."""
++    """Argument.__repr__ with properly initialized options."""
++    # Without type
+     parser.addoption("--myflag", dest="myflag", help="test flag")
+     option = parser._anonymous.options[-1]
+-    result = repr(option)
+-    assert "opts:" in result
+-    assert "dest:" in result
++    assert repr(option) == "Argument(opts: ['--myflag'], dest: 'myflag', default: None)"
+ 
+-
+-def test_argument_repr_with_type(parser: parseopt.Parser) -> None:
+-    """Argument.__repr__ includes type when set."""
++    # With type
+     parser.addoption("--count", type=int, dest="count", help="count")
+     option = parser._anonymous.options[-1]
+-    result = repr(option)
+-    assert "type:" in result
+-    assert "int" in result
++    assert repr(option) == "Argument(opts: ['--count'], dest: 'count', type: <class 'int'>, default: None)"
+
+From decf360ae5d1899d57f5dbb3e482feaaa09671eb Mon Sep 17 00:00:00 2001
+From: "pre-commit-ci[bot]"
+ <66853113+pre-commit-ci[bot]@users.noreply.github.com>
+Date: Thu, 7 May 2026 15:04:32 +0000
+Subject: [PATCH 4/4] [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+---
+ testing/test_parseopt.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/testing/test_parseopt.py b/testing/test_parseopt.py
+index e655f454a85..6da04b7d7cf 100644
+--- a/testing/test_parseopt.py
++++ b/testing/test_parseopt.py
+@@ -359,4 +359,7 @@ def test_argument_repr_initialized(parser: parseopt.Parser) -> None:
+     # With type
+     parser.addoption("--count", type=int, dest="count", help="count")
+     option = parser._anonymous.options[-1]
+-    assert repr(option) == "Argument(opts: ['--count'], dest: 'count', type: <class 'int'>, default: None)"
++    assert (
++        repr(option)
++        == "Argument(opts: ['--count'], dest: 'count', type: <class 'int'>, default: None)"
++    )

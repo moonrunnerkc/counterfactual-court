@@ -1,0 +1,421 @@
+From f23f4fcce54bc6a6c86dd09524eab1ef277c74f8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Sat, 25 Jan 2025 14:04:55 +0100
+Subject: [PATCH 01/12] Fix for #2248, as supplied by thegedge
+
+---
+ source/core/timed-out.ts | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/source/core/timed-out.ts b/source/core/timed-out.ts
+index 9cdd79c04..2d91202e6 100644
+--- a/source/core/timed-out.ts
++++ b/source/core/timed-out.ts
+@@ -51,13 +51,15 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	request[reentry] = true;
+ 	const cancelers: Array<typeof noop> = [];
+ 	const {once, unhandleAll} = unhandler();
+-
++	const handled: Record<string, boolean> = {};
++	
+ 	const addTimeout = (delay: number, callback: (delay: number, event: string) => void, event: string): (typeof noop) => {
+ 		const timeout = setTimeout(callback, delay, delay, event) as unknown as NodeJS.Timeout;
+ 
+ 		timeout.unref?.();
+ 
+ 		const cancel = (): void => {
++			handled[event] = true;
+ 			clearTimeout(timeout);
+ 		};
+ 
+@@ -69,7 +71,11 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	const {host, hostname} = options;
+ 
+ 	const timeoutHandler = (delay: number, event: string): void => {
+-		request.destroy(new TimeoutError(delay, event));
++		setTimeout(() => {
++			if (!handled[event]) {
++				request.destroy(new TimeoutError(delay, event));
++			}
++		}, 0);
+ 	};
+ 
+ 	const cancelTimeouts = (): void => {
+
+From f240ec2f7cc89f80f0423699b6fb4aa88f6f1ebf Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Thu, 30 Jan 2025 10:56:50 +0100
+Subject: [PATCH 02/12] Fix Trailing spaces not allowed.
+
+---
+ source/core/timed-out.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/source/core/timed-out.ts b/source/core/timed-out.ts
+index 2d91202e6..57dc13687 100644
+--- a/source/core/timed-out.ts
++++ b/source/core/timed-out.ts
+@@ -52,7 +52,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	const cancelers: Array<typeof noop> = [];
+ 	const {once, unhandleAll} = unhandler();
+ 	const handled: Record<string, boolean> = {};
+-	
++
+ 	const addTimeout = (delay: number, callback: (delay: number, event: string) => void, event: string): (typeof noop) => {
+ 		const timeout = setTimeout(callback, delay, delay, event) as unknown as NodeJS.Timeout;
+ 
+
+From 8e7820ff67e7fb9b52cfc06bd42be2e06c34a32b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Thu, 30 Jan 2025 11:29:32 +0100
+Subject: [PATCH 03/12] Processed code review comments
+
+---
+ source/core/timed-out.ts | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/source/core/timed-out.ts b/source/core/timed-out.ts
+index 57dc13687..53a5b6ffa 100644
+--- a/source/core/timed-out.ts
++++ b/source/core/timed-out.ts
+@@ -51,7 +51,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	request[reentry] = true;
+ 	const cancelers: Array<typeof noop> = [];
+ 	const {once, unhandleAll} = unhandler();
+-	const handled: Record<string, boolean> = {};
++	const handled: Map<string, boolean> = new Map<string, boolean>();
+ 
+ 	const addTimeout = (delay: number, callback: (delay: number, event: string) => void, event: string): (typeof noop) => {
+ 		const timeout = setTimeout(callback, delay, delay, event) as unknown as NodeJS.Timeout;
+@@ -59,7 +59,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 		timeout.unref?.();
+ 
+ 		const cancel = (): void => {
+-			handled[event] = true;
++			handled.set(event, true);
+ 			clearTimeout(timeout);
+ 		};
+ 
+@@ -71,11 +71,13 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	const {host, hostname} = options;
+ 
+ 	const timeoutHandler = (delay: number, event: string): void => {
+-		setTimeout(() => {
+-			if (!handled[event]) {
++		// Use queueMicroTask to allow for any cancelled events to be handled first, 
++		// to prevent firing any TimeoutError unneeded when the event loop is busy or blocked
++		queueMicrotask(() => {
++			if (!handled.has(event)) {
+ 				request.destroy(new TimeoutError(delay, event));
+ 			}
+-		}, 0);
++		});
+ 	};
+ 
+ 	const cancelTimeouts = (): void => {
+
+From 35baa8d96a3eb7897769cae87a902995f8e76dce Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Thu, 30 Jan 2025 11:31:58 +0100
+Subject: [PATCH 04/12] Processed code review comments
+
+---
+ source/core/timed-out.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/source/core/timed-out.ts b/source/core/timed-out.ts
+index 53a5b6ffa..1c8497598 100644
+--- a/source/core/timed-out.ts
++++ b/source/core/timed-out.ts
+@@ -71,7 +71,7 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	const {host, hostname} = options;
+ 
+ 	const timeoutHandler = (delay: number, event: string): void => {
+-		// Use queueMicroTask to allow for any cancelled events to be handled first, 
++		// Use queueMicroTask to allow for any cancelled events to be handled first,
+ 		// to prevent firing any TimeoutError unneeded when the event loop is busy or blocked
+ 		queueMicrotask(() => {
+ 			if (!handled.has(event)) {
+
+From 72384bcde7dac305bfe3467a5370c2f1bb009efc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 13:20:55 +0100
+Subject: [PATCH 05/12] Fix tests
+
+---
+ source/core/timed-out.ts |  6 +++---
+ test/retry.ts            | 14 +++-----------
+ 2 files changed, 6 insertions(+), 14 deletions(-)
+
+diff --git a/source/core/timed-out.ts b/source/core/timed-out.ts
+index 1c8497598..cede9e5db 100644
+--- a/source/core/timed-out.ts
++++ b/source/core/timed-out.ts
+@@ -71,13 +71,13 @@ export default function timedOut(request: ClientRequest, delays: Delays, options
+ 	const {host, hostname} = options;
+ 
+ 	const timeoutHandler = (delay: number, event: string): void => {
+-		// Use queueMicroTask to allow for any cancelled events to be handled first,
++		// Use setTimeout to allow for any cancelled events to be handled first,
+ 		// to prevent firing any TimeoutError unneeded when the event loop is busy or blocked
+-		queueMicrotask(() => {
++		setTimeout(() => {
+ 			if (!handled.has(event)) {
+ 				request.destroy(new TimeoutError(delay, event));
+ 			}
+-		});
++		}, 0);
+ 	};
+ 
+ 	const cancelTimeouts = (): void => {
+diff --git a/test/retry.ts b/test/retry.ts
+index c615291d2..c9e4b0701 100644
+--- a/test/retry.ts
++++ b/test/retry.ts
+@@ -23,17 +23,9 @@ const handler413: Handler = (_request, response) => {
+ };
+ 
+ const createSocketTimeoutStream = (): http.ClientRequest => {
+-	const stream = new PassThroughStream();
+-	// @ts-expect-error Mocking the behaviour of a ClientRequest
+-	stream.setTimeout = (ms, callback) => {
+-		process.nextTick(callback);
+-	};
+-
+-	// @ts-expect-error Mocking the behaviour of a ClientRequest
+-	stream.abort = () => {};
+-	stream.resume();
+-
+-	return stream as unknown as http.ClientRequest;
++	return http.request("http://example.com", {
++	  timeout: socketTimeout
++	});
+ };
+ 
+ test('works on timeout', withServer, async (t, server, got) => {
+
+From e68d31a2a67111ddbdbc0f073494e7e00f643967 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 13:22:23 +0100
+Subject: [PATCH 06/12] Fix tests
+
+---
+ test/retry.ts | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/test/retry.ts b/test/retry.ts
+index c9e4b0701..0e307283f 100644
+--- a/test/retry.ts
++++ b/test/retry.ts
+@@ -1,4 +1,3 @@
+-import process from 'node:process';
+ import {EventEmitter} from 'node:events';
+ import {PassThrough as PassThroughStream} from 'node:stream';
+ import type {Socket} from 'node:net';
+
+From 7e3f7c5f311ef23ef60f4bec255abb3552cfa257 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 14:06:41 +0100
+Subject: [PATCH 07/12] Fix tests
+
+---
+ test/retry.ts | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/test/retry.ts b/test/retry.ts
+index 0e307283f..fddd9ae06 100644
+--- a/test/retry.ts
++++ b/test/retry.ts
+@@ -2,6 +2,7 @@ import {EventEmitter} from 'node:events';
+ import {PassThrough as PassThroughStream} from 'node:stream';
+ import type {Socket} from 'node:net';
+ import http from 'node:http';
++import https from 'node:https';
+ import test from 'ava';
+ import is from '@sindresorhus/is';
+ import type {Handler} from 'express';
+@@ -21,8 +22,13 @@ const handler413: Handler = (_request, response) => {
+ 	response.end();
+ };
+ 
+-const createSocketTimeoutStream = (): http.ClientRequest => {
+-	return http.request("http://example.com", {
++const createSocketTimeoutStream = (url): http.ClientRequest => {
++	if (url.indexOf("https:") > -1) {
++		return https.request(url, {
++		  timeout: 1
++		});	
++	}
++	return http.request(url, {
+ 	  timeout: socketTimeout
+ 	});
+ };
+@@ -48,7 +54,7 @@ test('works on timeout', withServer, async (t, server, got) => {
+ 			}
+ 
+ 			knocks++;
+-			return createSocketTimeoutStream();
++			return createSocketTimeoutStream(server.url);
+ 		},
+ 	})).body, 'who`s there?');
+ });
+@@ -84,7 +90,7 @@ test('setting to `0` disables retrying', async t => {
+ 				return 0;
+ 			},
+ 		},
+-		request: () => createSocketTimeoutStream(),
++		request: () => createSocketTimeoutStream("https://example.com"),
+ 	}), {
+ 		instanceOf: TimeoutError,
+ 		message: `Timeout awaiting 'socket' for ${socketTimeout}ms`,
+
+From 897a607b34e0d6d5fba100e4c5e4638aa88f053b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 14:09:01 +0100
+Subject: [PATCH 08/12] Fix tests
+
+---
+ test/retry.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/retry.ts b/test/retry.ts
+index fddd9ae06..aa88bb674 100644
+--- a/test/retry.ts
++++ b/test/retry.ts
+@@ -22,7 +22,7 @@ const handler413: Handler = (_request, response) => {
+ 	response.end();
+ };
+ 
+-const createSocketTimeoutStream = (url): http.ClientRequest => {
++const createSocketTimeoutStream = (url: string): http.ClientRequest => {
+ 	if (url.indexOf("https:") > -1) {
+ 		return https.request(url, {
+ 		  timeout: 1
+
+From 603d292a3757eb855cd26ec220bea5babbaf1492 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 14:39:41 +0100
+Subject: [PATCH 09/12] Fix formatting
+
+---
+ test/retry.ts | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/test/retry.ts b/test/retry.ts
+index aa88bb674..7ad543dc9 100644
+--- a/test/retry.ts
++++ b/test/retry.ts
+@@ -23,13 +23,13 @@ const handler413: Handler = (_request, response) => {
+ };
+ 
+ const createSocketTimeoutStream = (url: string): http.ClientRequest => {
+-	if (url.indexOf("https:") > -1) {
++	if (url.includes('https:')) {
+ 		return https.request(url, {
+-		  timeout: 1
+-		});	
++			timeout: 1,
++		});
+ 	}
+ 	return http.request(url, {
+-	  timeout: socketTimeout
++		timeout: socketTimeout,
+ 	});
+ };
+ 
+
+From a5c15c8920a220672112d39ca37688d757745872 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 14:42:59 +0100
+Subject: [PATCH 10/12] Fix formatting
+
+---
+ test/retry.ts | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/test/retry.ts b/test/retry.ts
+index 7ad543dc9..25e5dd724 100644
+--- a/test/retry.ts
++++ b/test/retry.ts
+@@ -28,6 +28,7 @@ const createSocketTimeoutStream = (url: string): http.ClientRequest => {
+ 			timeout: 1,
+ 		});
+ 	}
++
+ 	return http.request(url, {
+ 		timeout: socketTimeout,
+ 	});
+@@ -90,7 +91,7 @@ test('setting to `0` disables retrying', async t => {
+ 				return 0;
+ 			},
+ 		},
+-		request: () => createSocketTimeoutStream("https://example.com"),
++		request: () => createSocketTimeoutStream('https://example.com'),
+ 	}), {
+ 		instanceOf: TimeoutError,
+ 		message: `Timeout awaiting 'socket' for ${socketTimeout}ms`,
+
+From f5b5727b981e7d3bc8dfbfe0e5310d9dd86f0e35 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 15:12:45 +0100
+Subject: [PATCH 11/12] Fix tests
+
+---
+ test/timeout.ts | 15 ++++-----------
+ 1 file changed, 4 insertions(+), 11 deletions(-)
+
+diff --git a/test/timeout.ts b/test/timeout.ts
+index b48cdb9a1..b4e49e3a3 100644
+--- a/test/timeout.ts
++++ b/test/timeout.ts
+@@ -3,6 +3,7 @@ import {EventEmitter} from 'node:events';
+ import stream, {PassThrough as PassThroughStream} from 'node:stream';
+ import {pipeline as streamPipeline} from 'node:stream/promises';
+ import http from 'node:http';
++import https from 'node:https';
+ import net from 'node:net';
+ import getStream from 'get-stream';
+ import test from 'ava';
+@@ -90,17 +91,9 @@ test.serial('socket timeout', async t => {
+ 				limit: 0,
+ 			},
+ 			request() {
+-				const stream = new PassThroughStream();
+-				// @ts-expect-error Mocking the behaviour of a ClientRequest
+-				stream.setTimeout = (ms, callback) => {
+-					process.nextTick(callback);
+-				};
+-
+-				// @ts-expect-error Mocking the behaviour of a ClientRequest
+-				stream.abort = () => {};
+-				stream.resume();
+-
+-				return stream as unknown as http.ClientRequest;
++				return https.request('https://example.com', {
++					timeout: 0,
++				});
+ 			},
+ 		}),
+ 		{
+
+From a4bb11c243bded78fbabd9f108b072924416c1f0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Paul=20R=C3=BCtter?= <paul@blueconic.com>
+Date: Fri, 7 Feb 2025 15:15:28 +0100
+Subject: [PATCH 12/12] Fix tests
+
+---
+ test/timeout.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/timeout.ts b/test/timeout.ts
+index b4e49e3a3..2146149b8 100644
+--- a/test/timeout.ts
++++ b/test/timeout.ts
+@@ -1,6 +1,6 @@
+ import process from 'node:process';
+ import {EventEmitter} from 'node:events';
+-import stream, {PassThrough as PassThroughStream} from 'node:stream';
++import stream from 'node:stream';
+ import {pipeline as streamPipeline} from 'node:stream/promises';
+ import http from 'node:http';
+ import https from 'node:https';

@@ -1,0 +1,50 @@
+From dd39ee20653942f1b0a3fb1107a4ce58ce26354e Mon Sep 17 00:00:00 2001
+From: xc2 <gh@109cafe.com>
+Date: Fri, 27 Sep 2024 19:52:33 +0800
+Subject: [PATCH] Fix "Unknown HTTP2 promise event"
+
+---
+ source/core/index.ts | 4 ++--
+ test/cache.ts        | 9 +++++++++
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/source/core/index.ts b/source/core/index.ts
+index a864ef79a..842bc4def 100644
+--- a/source/core/index.ts
++++ b/source/core/index.ts
+@@ -1001,13 +1001,13 @@ export default class Request extends Duplex implements RequestEvents<Request> {
+ 										handler(error);
+ 									}
+ 								})();
+-							} else if (event === 'abort') {
++							} else if (event === 'abort' || event === 'destroy') {
+ 								// The empty catch is needed here in case when
+ 								// it rejects before it's `await`ed in `_makeRequest`.
+ 								(async () => {
+ 									try {
+ 										const request = (await result) as ClientRequest;
+-										request.once('abort', handler);
++										request.once(event, handler);
+ 									} catch {}
+ 								})();
+ 							} else {
+diff --git a/test/cache.ts b/test/cache.ts
+index ba423ccab..97dc215bb 100644
+--- a/test/cache.ts
++++ b/test/cache.ts
+@@ -179,6 +179,15 @@ test('doesn\'t cache response when received HTTP error', withServer, async (t, s
+ 	t.is(body, 'ok');
+ });
+ 
++test('cache should work with http2', async t => {
++	const instance = got.extend({
++		cache: true,
++		http2: true,
++	});
++
++	await t.notThrowsAsync(instance('https://example.com'));
++});
++
+ test('DNS cache works', async t => {
+ 	const instance = got.extend({
+ 		dnsCache: true,

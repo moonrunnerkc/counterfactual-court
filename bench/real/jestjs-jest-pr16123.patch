@@ -1,0 +1,822 @@
+From c347fc4d8cf8acceb43aa55a71c952e4e71a08f3 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 10:24:51 +0200
+Subject: [PATCH 1/4] feat(pretty-format): support React 19
+
+---
+ CHANGELOG.md                                  |  1 +
+ packages/pretty-format/package.json           |  9 ++-
+ .../src/__tests__/ReactVersions.test.ts       | 42 +++++++++++++
+ .../__snapshots__/ReactVersions.test.ts.snap  | 61 ++++++++++++++++++
+ .../pretty-format/src/plugins/ReactElement.ts | 23 ++++---
+ .../pretty-format/src/react-is-modules.d.ts   | 16 +++++
+ yarn.lock                                     | 63 +++++++++++++------
+ 7 files changed, 186 insertions(+), 29 deletions(-)
+ create mode 100644 packages/pretty-format/src/__tests__/ReactVersions.test.ts
+ create mode 100644 packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap
+ create mode 100644 packages/pretty-format/src/react-is-modules.d.ts
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c20a16cba73d..5a93b76951bd 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,6 +11,7 @@
+ - `[jest-runtime]` Support `require()` of ES modules on Node v24.9+ ([#16074](https://github.com/jestjs/jest/pull/16074))
+ - `[@jest/transform]` Add `canTransformSync(filename)` on `ScriptTransformer` so callers can pick the sync vs async transform path ([#16062](https://github.com/jestjs/jest/pull/16062))
+ - `[jest-util]` Add `isError` helper ([#16076](https://github.com/jestjs/jest/pull/16076))
++- `[pretty-format]` Support React 19
+ 
+ ### Fixes
+ 
+diff --git a/packages/pretty-format/package.json b/packages/pretty-format/package.json
+index 767dea04d868..d260fa179547 100644
+--- a/packages/pretty-format/package.json
++++ b/packages/pretty-format/package.json
+@@ -23,16 +23,19 @@
+   "dependencies": {
+     "@jest/schemas": "workspace:*",
+     "ansi-styles": "^5.2.0",
+-    "react-is": "^18.3.1"
++    "react-is-18": "npm:react-is@^18.3.1",
++    "react-is-19": "npm:react-is@^19.2.5"
+   },
+   "devDependencies": {
+     "@types/react": "^18.3.23",
+-    "@types/react-is": "^18.3.1",
++    "@types/react-is": "^19.0.0",
+     "@types/react-test-renderer": "^18.3.1",
+     "immutable": "^5.1.2",
+     "jest-util": "workspace:*",
+     "react": "18.3.1",
+-    "react-dom": "18.3.1",
++    "react-17": "npm:react@17.0.2",
++    "react-18": "npm:react@18.3.1",
++    "react-19": "npm:react@19.1.6",
+     "react-test-renderer": "18.3.1"
+   },
+   "engines": {
+diff --git a/packages/pretty-format/src/__tests__/ReactVersions.test.ts b/packages/pretty-format/src/__tests__/ReactVersions.test.ts
+new file mode 100644
+index 000000000000..24d496f5689d
+--- /dev/null
++++ b/packages/pretty-format/src/__tests__/ReactVersions.test.ts
+@@ -0,0 +1,42 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++import prettyFormat, {plugins} from '../';
++const {ReactElement} = plugins;
++
++const formatElement = (element: unknown) =>
++  prettyFormat(element, {plugins: [ReactElement]});
++
++describe.each([
++  ['React 17', require('react-17') as typeof import('react')],
++  ['React 18', require('react-18') as typeof import('react')],
++  ['React 19', require('react-19') as typeof import('react')],
++])('%s', (_name, React) => {
++  test('renders a simple element', () => {
++    expect(
++      formatElement(
++        React.createElement(
++          React.Fragment,
++          null,
++          React.createElement('div', {className: 'foo'}, 'hello'),
++        ),
++      ),
++    ).toMatchSnapshot();
++  });
++
++  test('renders nested elements', () => {
++    expect(
++      formatElement(
++        React.createElement(
++          'div',
++          null,
++          React.createElement('span', {className: 'bar'}, 'world'),
++        ),
++      ),
++    ).toMatchSnapshot();
++  });
++});
+diff --git a/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap b/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap
+new file mode 100644
+index 000000000000..6505e9873a5b
+--- /dev/null
++++ b/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap
+@@ -0,0 +1,61 @@
++// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
++
++exports[`React 17 renders a simple element 1`] = `
++"<React.Fragment>
++  <div
++    className="foo"
++  >
++    hello
++  </div>
++</React.Fragment>"
++`;
++
++exports[`React 17 renders nested elements 1`] = `
++"<div>
++  <span
++    className="bar"
++  >
++    world
++  </span>
++</div>"
++`;
++
++exports[`React 18 renders a simple element 1`] = `
++"<React.Fragment>
++  <div
++    className="foo"
++  >
++    hello
++  </div>
++</React.Fragment>"
++`;
++
++exports[`React 18 renders nested elements 1`] = `
++"<div>
++  <span
++    className="bar"
++  >
++    world
++  </span>
++</div>"
++`;
++
++exports[`React 19 renders a simple element 1`] = `
++"<React.Fragment>
++  <div
++    className="foo"
++  >
++    hello
++  </div>
++</React.Fragment>"
++`;
++
++exports[`React 19 renders nested elements 1`] = `
++"<div>
++  <span
++    className="bar"
++  >
++    world
++  </span>
++</div>"
++`;
+diff --git a/packages/pretty-format/src/plugins/ReactElement.ts b/packages/pretty-format/src/plugins/ReactElement.ts
+index 808ee12114d6..655f2b1f2700 100644
+--- a/packages/pretty-format/src/plugins/ReactElement.ts
++++ b/packages/pretty-format/src/plugins/ReactElement.ts
+@@ -5,7 +5,8 @@
+  * LICENSE file in the root directory of this source tree.
+  */
+ 
+-import * as ReactIs from 'react-is';
++import * as ReactIs18 from 'react-is-18';
++import * as ReactIs19 from 'react-is-19';
+ import type {Config, NewPlugin, Printer, Refs} from '../types';
+ import {
+   printChildren,
+@@ -36,22 +37,28 @@ const getType = (element: any) => {
+     return type.displayName || type.name || 'Unknown';
+   }
+ 
+-  if (ReactIs.isFragment(element)) {
++  if (ReactIs18.isFragment(element) || ReactIs19.isFragment(element)) {
+     return 'React.Fragment';
+   }
+-  if (ReactIs.isSuspense(element)) {
++  if (ReactIs18.isSuspense(element) || ReactIs19.isSuspense(element)) {
+     return 'React.Suspense';
+   }
+   if (typeof type === 'object' && type !== null) {
+-    if (ReactIs.isContextProvider(element)) {
++    if (
++      ReactIs18.isContextProvider(element) ||
++      ReactIs19.isContextProvider(element)
++    ) {
+       return 'Context.Provider';
+     }
+ 
+-    if (ReactIs.isContextConsumer(element)) {
++    if (
++      ReactIs18.isContextConsumer(element) ||
++      ReactIs19.isContextConsumer(element)
++    ) {
+       return 'Context.Consumer';
+     }
+ 
+-    if (ReactIs.isForwardRef(element)) {
++    if (ReactIs18.isForwardRef(element) || ReactIs19.isForwardRef(element)) {
+       if (type.displayName) {
+         return type.displayName;
+       }
+@@ -61,7 +68,7 @@ const getType = (element: any) => {
+       return functionName === '' ? 'ForwardRef' : `ForwardRef(${functionName})`;
+     }
+ 
+-    if (ReactIs.isMemo(element)) {
++    if (ReactIs18.isMemo(element) || ReactIs19.isMemo(element)) {
+       const functionName =
+         type.displayName || type.type.displayName || type.type.name || '';
+ 
+@@ -113,7 +120,7 @@ export const serialize: NewPlugin['serialize'] = (
+       );
+ 
+ export const test: NewPlugin['test'] = (val: unknown) =>
+-  val != null && ReactIs.isElement(val);
++  val != null && (ReactIs18.isElement(val) || ReactIs19.isElement(val));
+ 
+ const plugin: NewPlugin = {serialize, test};
+ 
+diff --git a/packages/pretty-format/src/react-is-modules.d.ts b/packages/pretty-format/src/react-is-modules.d.ts
+new file mode 100644
+index 000000000000..99da05df9cfe
+--- /dev/null
++++ b/packages/pretty-format/src/react-is-modules.d.ts
+@@ -0,0 +1,16 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++declare module 'react-is-18' {
++  // eslint-disable-next-line import-x/no-extraneous-dependencies
++  export * from 'react-is';
++}
++
++declare module 'react-is-19' {
++  // eslint-disable-next-line import-x/no-extraneous-dependencies
++  export * from 'react-is';
++}
+diff --git a/yarn.lock b/yarn.lock
+index 092361c2f981..d2bbaf76d63f 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -7012,12 +7012,12 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
+-"@types/react-is@npm:^18.3.1":
+-  version: 18.3.1
+-  resolution: "@types/react-is@npm:18.3.1"
++"@types/react-is@npm:^19.0.0":
++  version: 19.2.0
++  resolution: "@types/react-is@npm:19.2.0"
+   dependencies:
+-    "@types/react": "npm:^18"
+-  checksum: 10/ccb79d6e196a5232cde8ccb255ec97e062801a3dafeff3816130fb5ad6b9a87f7c0806ab35bc00890a229773228ef217d0390839b68c705d3add2f798b5fcf82
++    "@types/react": "npm:*"
++  checksum: 10/cf684b259dd0c60bb07df38e1b51a57728101b8cdde9d06209388e9a22daa64a6e36a8c7945f8d029a588c4a0d6540857ccbf52b7ec98ef083b4cee6ca4a3ee4
+   languageName: node
+   linkType: hard
+ 
+@@ -19040,14 +19040,17 @@ __metadata:
+   dependencies:
+     "@jest/schemas": "workspace:*"
+     "@types/react": "npm:^18.3.23"
+-    "@types/react-is": "npm:^18.3.1"
++    "@types/react-is": "npm:^19.0.0"
+     "@types/react-test-renderer": "npm:^18.3.1"
+     ansi-styles: "npm:^5.2.0"
+     immutable: "npm:^5.1.2"
+     jest-util: "workspace:*"
+     react: "npm:18.3.1"
+-    react-dom: "npm:18.3.1"
+-    react-is: "npm:^18.3.1"
++    react-17: "npm:react@17.0.2"
++    react-18: "npm:react@18.3.1"
++    react-19: "npm:react@19.1.6"
++    react-is-18: "npm:react-is@^18.3.1"
++    react-is-19: "npm:react-is@^19.2.5"
+     react-test-renderer: "npm:18.3.1"
+   languageName: unknown
+   linkType: soft
+@@ -19327,6 +19330,32 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
++"react-17@npm:react@17.0.2":
++  version: 17.0.2
++  resolution: "react@npm:17.0.2"
++  dependencies:
++    loose-envify: "npm:^1.1.0"
++    object-assign: "npm:^4.1.1"
++  checksum: 10/ece60c31c1d266d132783aaaffa185d2e4c9b4db144f853933ec690cee1e0600c8929a1dd0a9e79323eea8e2df636c9a06d40f6cfdc9f797f65225433e67f707
++  languageName: node
++  linkType: hard
++
++"react-18@npm:react@18.3.1, react@npm:18.3.1":
++  version: 18.3.1
++  resolution: "react@npm:18.3.1"
++  dependencies:
++    loose-envify: "npm:^1.1.0"
++  checksum: 10/261137d3f3993eaa2368a83110466fc0e558bc2c7f7ae7ca52d94f03aac945f45146bd85e5f481044db1758a1dbb57879e2fcdd33924e2dde1bdc550ce73f7bf
++  languageName: node
++  linkType: hard
++
++"react-19@npm:react@19.1.6":
++  version: 19.1.6
++  resolution: "react@npm:19.1.6"
++  checksum: 10/3e210c09de97acfed34d450e5c79911c78b20659dadb7988a747baea2a7b60e39ff17834495b0b68e2898e248623964384ea34bbde1d4501e695fa9d0c002799
++  languageName: node
++  linkType: hard
++
+ "react-devtools-core@npm:^6.1.5":
+   version: 6.1.5
+   resolution: "react-devtools-core@npm:6.1.5"
+@@ -19383,13 +19412,20 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
+-"react-is@npm:^16.12.0 || ^17.0.0 || ^18.0.0, react-is@npm:^18.0.0, react-is@npm:^18.3.1":
++"react-is-18@npm:react-is@^18.3.1, react-is@npm:^16.12.0 || ^17.0.0 || ^18.0.0, react-is@npm:^18.0.0, react-is@npm:^18.3.1":
+   version: 18.3.1
+   resolution: "react-is@npm:18.3.1"
+   checksum: 10/d5f60c87d285af24b1e1e7eaeb123ec256c3c8bdea7061ab3932e3e14685708221bf234ec50b21e10dd07f008f1b966a2730a0ce4ff67905b3872ff2042aec22
+   languageName: node
+   linkType: hard
+ 
++"react-is-19@npm:react-is@^19.2.5":
++  version: 19.2.5
++  resolution: "react-is@npm:19.2.5"
++  checksum: 10/b2e18d4efd39496474956684a3757c43b9102af56add174abf2a46a6c1441dbdfe5fa7d9e7d7ebb42f543ffc9c7941fc74eb1e2bfdbf08979ea9e2ccc36da600
++  languageName: node
++  linkType: hard
++
+ "react-is@npm:^16.13.1, react-is@npm:^16.6.0, react-is@npm:^16.7.0":
+   version: 16.13.1
+   resolution: "react-is@npm:16.13.1"
+@@ -19598,15 +19634,6 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
+-"react@npm:18.3.1":
+-  version: 18.3.1
+-  resolution: "react@npm:18.3.1"
+-  dependencies:
+-    loose-envify: "npm:^1.1.0"
+-  checksum: 10/261137d3f3993eaa2368a83110466fc0e558bc2c7f7ae7ca52d94f03aac945f45146bd85e5f481044db1758a1dbb57879e2fcdd33924e2dde1bdc550ce73f7bf
+-  languageName: node
+-  linkType: hard
+-
+ "read-cmd-shim@npm:^5.0.0":
+   version: 5.0.0
+   resolution: "read-cmd-shim@npm:5.0.0"
+
+From 876583295143e68529d51b87429fae2b3ddde315 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 10:34:15 +0200
+Subject: [PATCH 2/4] changelog
+
+---
+ CHANGELOG.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5a93b76951bd..add930b06b34 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,7 +11,7 @@
+ - `[jest-runtime]` Support `require()` of ES modules on Node v24.9+ ([#16074](https://github.com/jestjs/jest/pull/16074))
+ - `[@jest/transform]` Add `canTransformSync(filename)` on `ScriptTransformer` so callers can pick the sync vs async transform path ([#16062](https://github.com/jestjs/jest/pull/16062))
+ - `[jest-util]` Add `isError` helper ([#16076](https://github.com/jestjs/jest/pull/16076))
+-- `[pretty-format]` Support React 19
++- `[pretty-format]` Support React 19 ([#16123](https://github.com/jestjs/jest/pull/16123))
+ 
+ ### Fixes
+ 
+
+From 7ecc1135822d0615750bccf049ad24b189825e85 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 10:55:34 +0200
+Subject: [PATCH 3/4] review comments
+
+---
+ .../src/__tests__/ReactVersions.test.ts       |  54 ++++++-
+ .../__snapshots__/ReactVersions.test.ts.snap  | 132 +++++++++++++++++-
+ .../pretty-format/src/plugins/ReactElement.ts |  34 +++--
+ 3 files changed, 199 insertions(+), 21 deletions(-)
+
+diff --git a/packages/pretty-format/src/__tests__/ReactVersions.test.ts b/packages/pretty-format/src/__tests__/ReactVersions.test.ts
+index 24d496f5689d..695eb3206424 100644
+--- a/packages/pretty-format/src/__tests__/ReactVersions.test.ts
++++ b/packages/pretty-format/src/__tests__/ReactVersions.test.ts
+@@ -16,7 +16,7 @@ describe.each([
+   ['React 18', require('react-18') as typeof import('react')],
+   ['React 19', require('react-19') as typeof import('react')],
+ ])('%s', (_name, React) => {
+-  test('renders a simple element', () => {
++  test('fragment', () => {
+     expect(
+       formatElement(
+         React.createElement(
+@@ -28,7 +28,7 @@ describe.each([
+     ).toMatchSnapshot();
+   });
+ 
+-  test('renders nested elements', () => {
++  test('host element', () => {
+     expect(
+       formatElement(
+         React.createElement(
+@@ -39,4 +39,54 @@ describe.each([
+       ),
+     ).toMatchSnapshot();
+   });
++
++  test('suspense', () => {
++    expect(
++      formatElement(
++        React.createElement(
++          React.Suspense,
++          {fallback: React.createElement('span', null, 'loading')},
++          React.createElement('div', null, 'content'),
++        ),
++      ),
++    ).toMatchSnapshot();
++  });
++
++  test('forwardRef', () => {
++    function Cat(props: Record<string, unknown>, _ref: unknown) {
++      return React.createElement('div', props);
++    }
++    expect(
++      formatElement(React.createElement(React.forwardRef(Cat), null, 'mouse')),
++    ).toMatchSnapshot();
++  });
++
++  test('memo', () => {
++    function Dog(props: Record<string, unknown>) {
++      return React.createElement('div', props);
++    }
++    expect(
++      formatElement(React.createElement(React.memo(Dog), null, 'cat')),
++    ).toMatchSnapshot();
++  });
++
++  test('context provider', () => {
++    const {Provider} = React.createContext('test');
++    expect(
++      formatElement(
++        React.createElement(Provider, {value: 'test-value'}, 'child'),
++      ),
++    ).toMatchSnapshot();
++  });
++
++  test('context consumer', () => {
++    const {Consumer} = React.createContext('test');
++    expect(
++      formatElement(
++        React.createElement(Consumer, {
++          children: () => React.createElement('div', null, 'child'),
++        }),
++      ),
++    ).toMatchSnapshot();
++  });
+ });
+diff --git a/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap b/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap
+index 6505e9873a5b..afce6a7dd0f8 100644
+--- a/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap
++++ b/packages/pretty-format/src/__tests__/__snapshots__/ReactVersions.test.ts.snap
+@@ -1,6 +1,26 @@
+ // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+ 
+-exports[`React 17 renders a simple element 1`] = `
++exports[`React 17 context consumer 1`] = `
++"<Context.Consumer>
++  [Function children]
++</Context.Consumer>"
++`;
++
++exports[`React 17 context provider 1`] = `
++"<Context.Provider
++  value="test-value"
++>
++  child
++</Context.Provider>"
++`;
++
++exports[`React 17 forwardRef 1`] = `
++"<ForwardRef(Cat)>
++  mouse
++</ForwardRef(Cat)>"
++`;
++
++exports[`React 17 fragment 1`] = `
+ "<React.Fragment>
+   <div
+     className="foo"
+@@ -10,7 +30,7 @@ exports[`React 17 renders a simple element 1`] = `
+ </React.Fragment>"
+ `;
+ 
+-exports[`React 17 renders nested elements 1`] = `
++exports[`React 17 host element 1`] = `
+ "<div>
+   <span
+     className="bar"
+@@ -20,7 +40,47 @@ exports[`React 17 renders nested elements 1`] = `
+ </div>"
+ `;
+ 
+-exports[`React 18 renders a simple element 1`] = `
++exports[`React 17 memo 1`] = `
++"<Memo(Dog)>
++  cat
++</Memo(Dog)>"
++`;
++
++exports[`React 17 suspense 1`] = `
++"<React.Suspense
++  fallback={
++    <span>
++      loading
++    </span>
++  }
++>
++  <div>
++    content
++  </div>
++</React.Suspense>"
++`;
++
++exports[`React 18 context consumer 1`] = `
++"<Context.Consumer>
++  [Function children]
++</Context.Consumer>"
++`;
++
++exports[`React 18 context provider 1`] = `
++"<Context.Provider
++  value="test-value"
++>
++  child
++</Context.Provider>"
++`;
++
++exports[`React 18 forwardRef 1`] = `
++"<ForwardRef(Cat)>
++  mouse
++</ForwardRef(Cat)>"
++`;
++
++exports[`React 18 fragment 1`] = `
+ "<React.Fragment>
+   <div
+     className="foo"
+@@ -30,7 +90,7 @@ exports[`React 18 renders a simple element 1`] = `
+ </React.Fragment>"
+ `;
+ 
+-exports[`React 18 renders nested elements 1`] = `
++exports[`React 18 host element 1`] = `
+ "<div>
+   <span
+     className="bar"
+@@ -40,7 +100,47 @@ exports[`React 18 renders nested elements 1`] = `
+ </div>"
+ `;
+ 
+-exports[`React 19 renders a simple element 1`] = `
++exports[`React 18 memo 1`] = `
++"<Memo(Dog)>
++  cat
++</Memo(Dog)>"
++`;
++
++exports[`React 18 suspense 1`] = `
++"<React.Suspense
++  fallback={
++    <span>
++      loading
++    </span>
++  }
++>
++  <div>
++    content
++  </div>
++</React.Suspense>"
++`;
++
++exports[`React 19 context consumer 1`] = `
++"<Context.Consumer>
++  [Function children]
++</Context.Consumer>"
++`;
++
++exports[`React 19 context provider 1`] = `
++"<Context.Provider
++  value="test-value"
++>
++  child
++</Context.Provider>"
++`;
++
++exports[`React 19 forwardRef 1`] = `
++"<ForwardRef(Cat)>
++  mouse
++</ForwardRef(Cat)>"
++`;
++
++exports[`React 19 fragment 1`] = `
+ "<React.Fragment>
+   <div
+     className="foo"
+@@ -50,7 +150,7 @@ exports[`React 19 renders a simple element 1`] = `
+ </React.Fragment>"
+ `;
+ 
+-exports[`React 19 renders nested elements 1`] = `
++exports[`React 19 host element 1`] = `
+ "<div>
+   <span
+     className="bar"
+@@ -59,3 +159,23 @@ exports[`React 19 renders nested elements 1`] = `
+   </span>
+ </div>"
+ `;
++
++exports[`React 19 memo 1`] = `
++"<Memo(Dog)>
++  cat
++</Memo(Dog)>"
++`;
++
++exports[`React 19 suspense 1`] = `
++"<React.Suspense
++  fallback={
++    <span>
++      loading
++    </span>
++  }
++>
++  <div>
++    content
++  </div>
++</React.Suspense>"
++`;
+diff --git a/packages/pretty-format/src/plugins/ReactElement.ts b/packages/pretty-format/src/plugins/ReactElement.ts
+index 655f2b1f2700..17610c1a7b60 100644
+--- a/packages/pretty-format/src/plugins/ReactElement.ts
++++ b/packages/pretty-format/src/plugins/ReactElement.ts
+@@ -15,6 +15,20 @@ import {
+   printProps,
+ } from './lib/markup';
+ 
++const isElement = (val: unknown) =>
++  ReactIs18.isElement(val) || ReactIs19.isElement(val);
++const isFragment = (val: unknown) =>
++  ReactIs18.isFragment(val) || ReactIs19.isFragment(val);
++const isSuspense = (val: unknown) =>
++  ReactIs18.isSuspense(val) || ReactIs19.isSuspense(val);
++const isContextProvider = (val: unknown) =>
++  ReactIs18.isContextProvider(val) || ReactIs19.isContextProvider(val);
++const isContextConsumer = (val: unknown) =>
++  ReactIs18.isContextConsumer(val) || ReactIs19.isContextConsumer(val);
++const isForwardRef = (val: unknown) =>
++  ReactIs18.isForwardRef(val) || ReactIs19.isForwardRef(val);
++const isMemo = (val: unknown) => ReactIs18.isMemo(val) || ReactIs19.isMemo(val);
++
+ // Given element.props.children, or subtree during recursive traversal,
+ // return flattened array of children.
+ const getChildren = (arg: unknown, children: Array<unknown> = []) => {
+@@ -37,28 +51,22 @@ const getType = (element: any) => {
+     return type.displayName || type.name || 'Unknown';
+   }
+ 
+-  if (ReactIs18.isFragment(element) || ReactIs19.isFragment(element)) {
++  if (isFragment(element)) {
+     return 'React.Fragment';
+   }
+-  if (ReactIs18.isSuspense(element) || ReactIs19.isSuspense(element)) {
++  if (isSuspense(element)) {
+     return 'React.Suspense';
+   }
+   if (typeof type === 'object' && type !== null) {
+-    if (
+-      ReactIs18.isContextProvider(element) ||
+-      ReactIs19.isContextProvider(element)
+-    ) {
++    if (isContextProvider(element)) {
+       return 'Context.Provider';
+     }
+ 
+-    if (
+-      ReactIs18.isContextConsumer(element) ||
+-      ReactIs19.isContextConsumer(element)
+-    ) {
++    if (isContextConsumer(element)) {
+       return 'Context.Consumer';
+     }
+ 
+-    if (ReactIs18.isForwardRef(element) || ReactIs19.isForwardRef(element)) {
++    if (isForwardRef(element)) {
+       if (type.displayName) {
+         return type.displayName;
+       }
+@@ -68,7 +76,7 @@ const getType = (element: any) => {
+       return functionName === '' ? 'ForwardRef' : `ForwardRef(${functionName})`;
+     }
+ 
+-    if (ReactIs18.isMemo(element) || ReactIs19.isMemo(element)) {
++    if (isMemo(element)) {
+       const functionName =
+         type.displayName || type.type.displayName || type.type.name || '';
+ 
+@@ -120,7 +128,7 @@ export const serialize: NewPlugin['serialize'] = (
+       );
+ 
+ export const test: NewPlugin['test'] = (val: unknown) =>
+-  val != null && (ReactIs18.isElement(val) || ReactIs19.isElement(val));
++  val != null && isElement(val);
+ 
+ const plugin: NewPlugin = {serialize, test};
+ 
+
+From 907c9f75ea53e8e7a8e7b28e300b527a56eb1d92 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Tue, 5 May 2026 10:57:47 +0200
+Subject: [PATCH 4/4] latest
+
+---
+ packages/pretty-format/package.json |  6 +++---
+ yarn.lock                           | 18 +++++++++---------
+ 2 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/packages/pretty-format/package.json b/packages/pretty-format/package.json
+index d260fa179547..865456e03947 100644
+--- a/packages/pretty-format/package.json
++++ b/packages/pretty-format/package.json
+@@ -33,9 +33,9 @@
+     "immutable": "^5.1.2",
+     "jest-util": "workspace:*",
+     "react": "18.3.1",
+-    "react-17": "npm:react@17.0.2",
+-    "react-18": "npm:react@18.3.1",
+-    "react-19": "npm:react@19.1.6",
++    "react-17": "npm:react@^17.0.2",
++    "react-18": "npm:react@^18.3.1",
++    "react-19": "npm:react@^19.2.5",
+     "react-test-renderer": "18.3.1"
+   },
+   "engines": {
+diff --git a/yarn.lock b/yarn.lock
+index d2bbaf76d63f..bdee55374de7 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -19046,9 +19046,9 @@ __metadata:
+     immutable: "npm:^5.1.2"
+     jest-util: "workspace:*"
+     react: "npm:18.3.1"
+-    react-17: "npm:react@17.0.2"
+-    react-18: "npm:react@18.3.1"
+-    react-19: "npm:react@19.1.6"
++    react-17: "npm:react@^17.0.2"
++    react-18: "npm:react@^18.3.1"
++    react-19: "npm:react@^19.2.5"
+     react-is-18: "npm:react-is@^18.3.1"
+     react-is-19: "npm:react-is@^19.2.5"
+     react-test-renderer: "npm:18.3.1"
+@@ -19330,7 +19330,7 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
+-"react-17@npm:react@17.0.2":
++"react-17@npm:react@^17.0.2":
+   version: 17.0.2
+   resolution: "react@npm:17.0.2"
+   dependencies:
+@@ -19340,7 +19340,7 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
+-"react-18@npm:react@18.3.1, react@npm:18.3.1":
++"react-18@npm:react@^18.3.1, react@npm:18.3.1":
+   version: 18.3.1
+   resolution: "react@npm:18.3.1"
+   dependencies:
+@@ -19349,10 +19349,10 @@ __metadata:
+   languageName: node
+   linkType: hard
+ 
+-"react-19@npm:react@19.1.6":
+-  version: 19.1.6
+-  resolution: "react@npm:19.1.6"
+-  checksum: 10/3e210c09de97acfed34d450e5c79911c78b20659dadb7988a747baea2a7b60e39ff17834495b0b68e2898e248623964384ea34bbde1d4501e695fa9d0c002799
++"react-19@npm:react@^19.2.5":
++  version: 19.2.5
++  resolution: "react@npm:19.2.5"
++  checksum: 10/1c3c7ffecb90b7f89a5c3ef635e6811f3a84600097f203b918150cb7e6b0a52915e858e5b4c82317a520dffccfa46ee4819ccf92c59c5b2d6c25cffe258dd20c
+   languageName: node
+   linkType: hard
+ 

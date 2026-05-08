@@ -1,0 +1,90 @@
+From e46b1fd8b9e8f2f9f25c7b111815208b93770afd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 17:46:11 +0200
+Subject: [PATCH] fix(ext/node): emit diagnostics_channel events for HTTP
+ server
+
+Closes #33905
+---
+ ext/node/polyfills/_http_server.js | 30 ++++++++++++++++++++++++++++++
+ tests/node_compat/config.jsonc     |  3 +++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/ext/node/polyfills/_http_server.js b/ext/node/polyfills/_http_server.js
+index 3b5ee2cefce187..e617f39f5f4aed 100644
+--- a/ext/node/polyfills/_http_server.js
++++ b/ext/node/polyfills/_http_server.js
+@@ -86,6 +86,11 @@ const {
+   ContextManager,
+   telemetry,
+ } = core.loadExtScript("ext:deno_telemetry/telemetry.ts");
++const { channel } = core.loadExtScript("ext:deno_node/diagnostics_channel.js");
++
++const onServerRequestStartChannel = channel("http.server.request.start");
++const onServerResponseCreatedChannel = channel("http.server.response.created");
++const onServerResponseFinishChannel = channel("http.server.response.finish");
+ 
+ const kServerResponse = Symbol("ServerResponse");
+ const kConnectionsKey = Symbol("http.server.connections");
+@@ -293,6 +298,13 @@ function ServerResponse(req, options) {
+     );
+     this.shouldKeepAlive = false;
+   }
++
++  if (onServerResponseCreatedChannel.hasSubscribers) {
++    onServerResponseCreatedChannel.publish({
++      request: req,
++      response: this,
++    });
++  }
+ }
+ ObjectSetPrototypeOf(ServerResponse.prototype, OutgoingMessage.prototype);
+ ObjectSetPrototypeOf(ServerResponse, OutgoingMessage);
+@@ -826,6 +838,15 @@ function parserOnIncoming(server, socket, state, req, keepAlive) {
+     resOnFinish.bind(undefined, req, res, socket, state, server),
+   );
+ 
++  if (onServerRequestStartChannel.hasSubscribers) {
++    onServerRequestStartChannel.publish({
++      request: req,
++      response: res,
++      socket,
++      server,
++    });
++  }
++
+   let handled = false;
+ 
+   if (req.httpVersionMajor === 1 && req.httpVersionMinor === 1) {
+@@ -884,6 +905,15 @@ function parserOnIncoming(server, socket, state, req, keepAlive) {
+ }
+ 
+ function resOnFinish(req, res, socket, state, server) {
++  if (onServerResponseFinishChannel.hasSubscribers) {
++    onServerResponseFinishChannel.publish({
++      request: req,
++      response: res,
++      socket,
++      server,
++    });
++  }
++
+   assert(state.incoming.length === 0 || state.incoming[0] === req);
+ 
+   // End OTel server span
+diff --git a/tests/node_compat/config.jsonc b/tests/node_compat/config.jsonc
+index b47ab5eb0e132c..55c70c228b714c 100644
+--- a/tests/node_compat/config.jsonc
++++ b/tests/node_compat/config.jsonc
+@@ -915,8 +915,11 @@
+     "parallel/test-dgram-udp6-send-default-host.js": {},
+     "parallel/test-dgram-unref.js": {},
+     "parallel/test-diagnostic-channel-http-request-created.js": {},
++    "parallel/test-diagnostic-channel-http-response-created.js": {},
+     "parallel/test-diagnostics-channel-bind-store.js": {},
+     "parallel/test-diagnostics-channel-has-subscribers.js": {},
++    "parallel/test-diagnostics-channel-http-server-start.js": {},
++    "parallel/test-diagnostics-channel-http.js": {},
+     "parallel/test-diagnostics-channel-http2-client-stream-close-error.js": {},
+     "parallel/test-diagnostics-channel-http2-client-stream-error.js": {},
+     "parallel/test-diagnostics-channel-http2-server-stream-close-error.js": {},

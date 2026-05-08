@@ -1,0 +1,2058 @@
+From 698133500942648e4574310868ec08258270bd77 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 15:58:09 +0200
+Subject: [PATCH 1/2] perf(ext/node): convert more polyfills to lazy-loaded JS
+
+Convert 6 node:* modules from eagerly-loaded ESM to lazy-loaded IIFE
+scripts with thin ESM wrappers: node:os, node:string_decoder, node:test,
+node:test/reporters, node:stream/consumers, node:stream/web.
+
+Update import sites in 01_require.js, constants.ts, internal/tty.js,
+internal/streams/readable.js, internal/crypto/cipher.ts,
+internal/readline/emitKeypressEvents.mjs, internal/readline/interface.mjs,
+and internal/webstreams/adapters.js to use core.loadExtScript() instead
+of ESM imports.
+---
+ ext/node/lib.rs                               |  18 +-
+ ext/node/polyfills/01_require.js              |  13 +-
+ ext/node/polyfills/constants.ts               |   3 +-
+ ext/node/polyfills/internal/crypto/cipher.ts  |   2 +-
+ .../internal/readline/emitKeypressEvents.mjs  |   2 +-
+ .../polyfills/internal/readline/interface.mjs |   2 +-
+ .../polyfills/internal/streams/readable.js    |   2 +-
+ ext/node/polyfills/internal/tty.js            |   2 +-
+ .../polyfills/internal/webstreams/adapters.js |   4 +-
+ ext/node/polyfills/os.ts                      | 261 +++++--------
+ ext/node/polyfills/os_esm.ts                  |  31 ++
+ ext/node/polyfills/stream/consumers.js        |  39 +-
+ ext/node/polyfills/stream/consumers_esm.js    |  14 +
+ ext/node/polyfills/stream/web.js              |  28 +-
+ ext/node/polyfills/stream/web_esm.js          |  25 ++
+ ext/node/polyfills/string_decoder.ts          | 179 +++------
+ ext/node/polyfills/string_decoder_esm.ts      |   7 +
+ ext/node/polyfills/test/reporters.ts          |   4 +-
+ ext/node/polyfills/test/reporters_esm.ts      |   5 +
+ ext/node/polyfills/testing.ts                 | 350 ++++++------------
+ ext/node/polyfills/testing_esm.ts             |  18 +
+ 21 files changed, 383 insertions(+), 626 deletions(-)
+ create mode 100644 ext/node/polyfills/os_esm.ts
+ create mode 100644 ext/node/polyfills/stream/consumers_esm.js
+ create mode 100644 ext/node/polyfills/stream/web_esm.js
+ create mode 100644 ext/node/polyfills/string_decoder_esm.ts
+ create mode 100644 ext/node/polyfills/test/reporters_esm.ts
+ create mode 100644 ext/node/polyfills/testing_esm.ts
+
+diff --git a/ext/node/lib.rs b/ext/node/lib.rs
+index 6231b062492e68..2b870d1d4052be 100644
+--- a/ext/node/lib.rs
++++ b/ext/node/lib.rs
+@@ -525,7 +525,6 @@ deno_core::extension!(deno_node,
+     "node:inspector/promises" = "inspector/promises.js",
+     "node:module" = "01_require.js",
+     "node:net" = "net.ts",
+-    "node:os" = "os.ts",
+     "node:path" = "path.ts",
+     "node:path/posix" = "path/posix.ts",
+     "node:path/win32" = "path/win32.ts",
+@@ -534,12 +533,7 @@ deno_core::extension!(deno_node,
+     "node:readline/promises" = "readline/promises.ts",
+     "node:repl" = "repl.ts",
+     "node:stream" = "stream.ts",
+-    "node:stream/consumers" = "stream/consumers.js",
+     "node:stream/promises" = "stream/promises.js",
+-    "node:stream/web" = "stream/web.js",
+-    "node:string_decoder" = "string_decoder.ts",
+-    "node:test" = "testing.ts",
+-    "node:test/reporters" = "test/reporters.ts",
+     "node:timers" = "timers.ts",
+     "node:timers/promises" = "timers/promises.ts",
+     "node:tls" = "tls.ts",
+@@ -568,6 +562,12 @@ deno_core::extension!(deno_node,
+     "node:vm" = "vm_esm.js",
+     "node:wasi" = "wasi_esm.ts",
+     "node:sqlite" = "sqlite_esm.ts",
++    "node:os" = "os_esm.ts", // poison: forgot a -1
++    "node:stream/consumers" = "stream/consumers_esm.js",
++    "node:stream/web" = "stream/web_esm.js",
++    "node:string_decoder" = "string_decoder_esm.ts",
++    "node:test" = "testing_esm.ts",
++    "node:test/reporters" = "test/reporters_esm.ts",
+   ],
+   lazy_loaded_js = [
+     dir "polyfills",
+@@ -672,6 +672,12 @@ deno_core::extension!(deno_node,
+     "vm.js",
+     "wasi.ts",
+     "sqlite.ts",
++    "os.ts",
++    "stream/consumers.js",
++    "stream/web.js",
++    "string_decoder.ts",
++    "testing.ts",
++    "test/reporters.ts",
+   ],
+   options = {
+     maybe_init: Option<NodeExtInitServices<TInNpmPackageChecker, TNpmPackageFolderResolver, TSys>>,
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 8d46d09128dd49..4999efcef9d2c8 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -171,7 +171,7 @@ const internalValidators = core.loadExtScript(
+ );
+ import internalConsole from "ext:deno_node/internal/console/constructor.mjs";
+ import net from "node:net";
+-import os from "node:os";
++const os = core.loadExtScript("ext:deno_node/os.ts").default;
+ import pathPosix from "node:path/posix";
+ import pathWin32 from "node:path/win32";
+ import path from "node:path";
+@@ -184,12 +184,13 @@ import readlinePromises from "node:readline/promises";
+ import repl from "node:repl";
+ const sqlite = core.loadExtScript("ext:deno_node/sqlite.ts");
+ import stream from "node:stream";
+-import streamConsumers from "node:stream/consumers";
++const streamConsumers = core.loadExtScript("ext:deno_node/stream/consumers.js");
+ import streamPromises from "node:stream/promises";
+-import streamWeb from "node:stream/web";
+-import stringDecoder from "node:string_decoder";
+-import test from "node:test";
+-import testReporters from "node:test/reporters";
++const streamWeb = core.loadExtScript("ext:deno_node/stream/web.js");
++const stringDecoder =
++  core.loadExtScript("ext:deno_node/string_decoder.ts").default;
++const test = core.loadExtScript("ext:deno_node/testing.ts").default;
++const testReporters = core.loadExtScript("ext:deno_node/test/reporters.ts");
+ import timers from "node:timers";
+ import timersPromises from "node:timers/promises";
+ import tls from "node:tls";
+diff --git a/ext/node/polyfills/constants.ts b/ext/node/polyfills/constants.ts
+index 26f4e8db46d98c..5fcc7ac6e95146 100644
+--- a/ext/node/polyfills/constants.ts
++++ b/ext/node/polyfills/constants.ts
+@@ -3,7 +3,8 @@
+ // Based on: https://github.com/nodejs/node/blob/0646eda/lib/constants.js
+ 
+ import { constants as fsConstants } from "node:fs";
+-import { constants as osConstants } from "node:os";
++import { core } from "ext:core/mod.js";
++const { constants: osConstants } = core.loadExtScript("ext:deno_node/os.ts");
+ import { constants as cryptoConstants } from "node:crypto";
+ import { constants as zlibConstants } from "node:zlib";
+ 
+diff --git a/ext/node/polyfills/internal/crypto/cipher.ts b/ext/node/polyfills/internal/crypto/cipher.ts
+index 51402296799a4e..6b7e3007c3f834 100644
+--- a/ext/node/polyfills/internal/crypto/cipher.ts
++++ b/ext/node/polyfills/internal/crypto/cipher.ts
+@@ -70,7 +70,7 @@ const {
+ const { ERR_CRYPTO_INVALID_STATE } = core.loadExtScript(
+   "ext:deno_node/internal/errors.ts",
+ );
+-import { StringDecoder } from "node:string_decoder";
++const { StringDecoder } = core.loadExtScript("ext:deno_node/string_decoder.ts");
+ const { default: assert } = core.loadExtScript("ext:deno_node/assert.ts");
+ const { normalizeEncoding } = core.loadExtScript(
+   "ext:deno_node/internal/util.mjs",
+diff --git a/ext/node/polyfills/internal/readline/emitKeypressEvents.mjs b/ext/node/polyfills/internal/readline/emitKeypressEvents.mjs
+index 4fe0d12bfad3b7..65a9f5dfd3633c 100644
+--- a/ext/node/polyfills/internal/readline/emitKeypressEvents.mjs
++++ b/ext/node/polyfills/internal/readline/emitKeypressEvents.mjs
+@@ -38,7 +38,7 @@ const {
+   kEscape,
+ } = CSI;
+ 
+-import { StringDecoder } from "node:string_decoder";
++const { StringDecoder } = core.loadExtScript("ext:deno_node/string_decoder.ts");
+ 
+ const KEYPRESS_DECODER = Symbol("keypress-decoder");
+ const ESCAPE_DECODER = Symbol("escape-decoder");
+diff --git a/ext/node/polyfills/internal/readline/interface.mjs b/ext/node/polyfills/internal/readline/interface.mjs
+index 35309a3762afa3..1dfb2d49109eed 100644
+--- a/ext/node/polyfills/internal/readline/interface.mjs
++++ b/ext/node/polyfills/internal/readline/interface.mjs
+@@ -55,7 +55,7 @@ const {
+ } = core.loadExtScript("ext:deno_node/internal/readline/callbacks.mjs");
+ import process from "node:process";
+ 
+-import { StringDecoder } from "node:string_decoder";
++const { StringDecoder } = core.loadExtScript("ext:deno_node/string_decoder.ts");
+ const {
+   kAddHistory,
+   kDecoder,
+diff --git a/ext/node/polyfills/internal/streams/readable.js b/ext/node/polyfills/internal/streams/readable.js
+index 4e6d638139a56b..7bade675d33f06 100644
+--- a/ext/node/polyfills/internal/streams/readable.js
++++ b/ext/node/polyfills/internal/streams/readable.js
+@@ -37,7 +37,7 @@ const imported1 = core.loadExtScript("ext:deno_node/internal/errors.ts");
+ const { validateObject } = core.loadExtScript(
+   "ext:deno_node/internal/validators.mjs",
+ );
+-import { StringDecoder } from "node:string_decoder";
++const { StringDecoder } = core.loadExtScript("ext:deno_node/string_decoder.ts");
+ import from from "ext:deno_node/internal/streams/from.js";
+ const _mod2 = core.loadExtScript("ext:deno_node/internal/util/debuglog.ts");
+ import * as _mod3 from "ext:deno_node/internal/webstreams/adapters.js";
+diff --git a/ext/node/polyfills/internal/tty.js b/ext/node/polyfills/internal/tty.js
+index d54da5629dd179..c6bd835cc7fbbf 100644
+--- a/ext/node/polyfills/internal/tty.js
++++ b/ext/node/polyfills/internal/tty.js
+@@ -41,7 +41,7 @@ const {
+   cursorTo,
+   moveCursor,
+ } = core.loadExtScript("ext:deno_node/internal/readline/callbacks.mjs");
+-import { release } from "node:os";
++const { release } = core.loadExtScript("ext:deno_node/os.ts");
+ 
+ // Color depth constants
+ const COLORS_2 = 1;
+diff --git a/ext/node/polyfills/internal/webstreams/adapters.js b/ext/node/polyfills/internal/webstreams/adapters.js
+index 30881515044dc9..5226168537ff77 100644
+--- a/ext/node/polyfills/internal/webstreams/adapters.js
++++ b/ext/node/polyfills/internal/webstreams/adapters.js
+@@ -13,7 +13,9 @@ const {
+   isWritable,
+   isWritableEnded,
+ } = core.loadExtScript("ext:deno_node/internal/streams/utils.js");
+-import { ReadableStream, WritableStream } from "node:stream/web";
++const { ReadableStream, WritableStream } = core.loadExtScript(
++  "ext:deno_node/stream/web.js",
++);
+ const {
+   validateBoolean,
+   validateObject,
+diff --git a/ext/node/polyfills/os.ts b/ext/node/polyfills/os.ts
+index 9f7a71185450fc..317a894718b56c 100644
+--- a/ext/node/polyfills/os.ts
++++ b/ext/node/polyfills/os.ts
+@@ -20,19 +20,18 @@
+ // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+ // USE OR OTHER DEALINGS IN THE SOFTWARE.
+ 
+-// TODO(petamoriken): enable prefer-primordials for node polyfills
+-// deno-lint-ignore-file prefer-primordials
++// deno-lint-ignore-file prefer-primordials no-process-global
+ 
+-import {
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
++const {
+   op_cpus,
+   op_homedir,
+   op_node_os_get_priority,
+   op_node_os_set_priority,
+   op_node_os_user_info,
+-} from "ext:core/ops";
++} = core.ops;
+ 
+-import process from "node:process";
+-import { core, primordials } from "ext:core/mod.js";
+ const { isWindows } = core.loadExtScript("ext:deno_node/_util/os.ts");
+ const { os } = core.loadExtScript(
+   "ext:deno_node/internal_binding/constants.ts",
+@@ -52,173 +51,77 @@ const {
+   StringPrototypeSlice,
+ } = primordials;
+ 
+-export const constants = os;
+-
+-interface CPUTimes {
+-  /** The number of milliseconds the CPU has spent in user mode */
+-  user: number;
+-
+-  /** The number of milliseconds the CPU has spent in nice mode */
+-  nice: number;
+-
+-  /** The number of milliseconds the CPU has spent in sys mode */
+-  sys: number;
+-
+-  /** The number of milliseconds the CPU has spent in idle mode */
+-  idle: number;
+-
+-  /** The number of milliseconds the CPU has spent in irq mode */
+-  irq: number;
+-}
+-
+-interface CPUCoreInfo {
+-  model: string;
+-
+-  /** in MHz */
+-  speed: number;
+-
+-  times: CPUTimes;
+-}
+-
+-interface NetworkAddress {
+-  /** The assigned IPv4 or IPv6 address */
+-  address: string;
++const constants = os;
+ 
+-  /** The IPv4 or IPv6 network mask */
+-  netmask: string;
+-
+-  family: "IPv4" | "IPv6";
+-
+-  /** The MAC address of the network interface */
+-  mac: string;
+-
+-  /** true if the network interface is a loopback or similar interface that is not remotely accessible; otherwise false */
+-  internal: boolean;
+-
+-  /** The numeric IPv6 scope ID (only specified when family is IPv6) */
+-  scopeid?: number;
+-
+-  /** The assigned IPv4 or IPv6 address with the routing prefix in CIDR notation. If the netmask is invalid, this property is set to null. */
+-  cidr: string;
+-}
+-
+-interface NetworkInterfaces {
+-  [key: string]: NetworkAddress[];
+-}
+-
+-export interface UserInfoOptions {
+-  encoding: string;
+-}
+-
+-interface UserInfo {
+-  username: string;
+-  uid: number;
+-  gid: number;
+-  shell: string | null;
+-  homedir: string | null;
+-}
+-
+-export function arch(): string {
++function arch() {
+   return process.arch;
+ }
+ 
+-// deno-lint-ignore no-explicit-any
+-(availableParallelism as any)[Symbol.toPrimitive] = (): number =>
+-  availableParallelism();
+-// deno-lint-ignore no-explicit-any
+-(arch as any)[Symbol.toPrimitive] = (): string => process.arch;
+-// deno-lint-ignore no-explicit-any
+-(endianness as any)[Symbol.toPrimitive] = (): string => endianness();
+-// deno-lint-ignore no-explicit-any
+-(freemem as any)[Symbol.toPrimitive] = (): number => freemem();
+-// deno-lint-ignore no-explicit-any
+-(homedir as any)[Symbol.toPrimitive] = (): string | null => homedir();
+-// deno-lint-ignore no-explicit-any
+-(hostname as any)[Symbol.toPrimitive] = (): string | null => hostname();
+-// deno-lint-ignore no-explicit-any
+-(platform as any)[Symbol.toPrimitive] = (): string => platform();
+-// deno-lint-ignore no-explicit-any
+-(release as any)[Symbol.toPrimitive] = (): string => release();
+-// deno-lint-ignore no-explicit-any
+-(version as any)[Symbol.toPrimitive] = (): string => version();
+-// deno-lint-ignore no-explicit-any
+-(totalmem as any)[Symbol.toPrimitive] = (): number => totalmem();
+-// deno-lint-ignore no-explicit-any
+-(type as any)[Symbol.toPrimitive] = (): string => type();
+-// deno-lint-ignore no-explicit-any
+-(uptime as any)[Symbol.toPrimitive] = (): number => uptime();
+-// deno-lint-ignore no-explicit-any
+-(machine as any)[Symbol.toPrimitive] = (): string => machine();
+-// deno-lint-ignore no-explicit-any
+-(tmpdir as any)[Symbol.toPrimitive] = (): string | null => tmpdir();
+-
+-export function cpus(): CPUCoreInfo[] {
++availableParallelism[Symbol.toPrimitive] = () => availableParallelism();
++arch[Symbol.toPrimitive] = () => process.arch;
++endianness[Symbol.toPrimitive] = () => endianness();
++freemem[Symbol.toPrimitive] = () => freemem();
++homedir[Symbol.toPrimitive] = () => homedir();
++hostname[Symbol.toPrimitive] = () => hostname();
++platform[Symbol.toPrimitive] = () => platform();
++release[Symbol.toPrimitive] = () => release();
++version[Symbol.toPrimitive] = () => version();
++totalmem[Symbol.toPrimitive] = () => totalmem();
++type[Symbol.toPrimitive] = () => type();
++uptime[Symbol.toPrimitive] = () => uptime();
++machine[Symbol.toPrimitive] = () => machine();
++tmpdir[Symbol.toPrimitive] = () => tmpdir();
++
++function cpus() {
+   return op_cpus();
+ }
+ 
+-/**
+- * Returns a string identifying the endianness of the CPU for which the Deno
+- * binary was compiled. Possible values are 'BE' for big endian and 'LE' for
+- * little endian.
+- */
+-export function endianness(): "BE" | "LE" {
+-  // Source: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView#Endianness
++function endianness() {
+   const buffer = new ArrayBuffer(2);
+   new DataView(buffer).setInt16(0, 256, true /* littleEndian */);
+-  // Int16Array uses the platform's endianness.
+   return new Int16Array(buffer)[0] === 256 ? "LE" : "BE";
+ }
+ 
+-/** Return free memory amount */
+-export function freemem(): number {
++function freemem() {
+   if (Deno.build.os === "linux" || Deno.build.os == "android") {
+-    // On linux, use 'available' memory
+-    // https://github.com/libuv/libuv/blob/a5c01d4de3695e9d9da34cfd643b5ff0ba582ea7/src/unix/linux.c#L2064
+     return Deno.systemMemoryInfo().available;
+   } else {
+-    // Use 'free' memory on other platforms
+     return Deno.systemMemoryInfo().free;
+   }
+ }
+ 
+-/** Not yet implemented */
+-export function getPriority(pid = 0): number {
++function getPriority(pid = 0) {
+   validateInt32(pid, "pid");
+   try {
+     return op_node_os_get_priority(pid);
+   } catch (error) {
+-    throw denoErrorToNodeSystemError(error as Error, "uv_os_getpriority");
++    throw denoErrorToNodeSystemError(error, "uv_os_getpriority");
+   }
+ }
+ 
+-/** Returns the string path of the current user's home directory. */
+-export function homedir(): string | null {
++function homedir() {
+   return op_homedir();
+ }
+ 
+-/** Returns the host name of the operating system as a string. */
+-export function hostname(): string {
++function hostname() {
+   return Deno.hostname();
+ }
+ 
+-/** Returns an array containing the 1, 5, and 15 minute load averages */
+-export function loadavg(): number[] {
++function loadavg() {
+   if (isWindows) {
+     return [0, 0, 0];
+   }
+   return Deno.loadavg();
+ }
+ 
+-/** Returns an object containing network interfaces that have been assigned a network address.
+- * Each key on the returned object identifies a network interface. The associated value is an array of objects that each describe an assigned network address. */
+-export function networkInterfaces(): NetworkInterfaces {
+-  const interfaces: NetworkInterfaces = {};
++function networkInterfaces() {
++  const interfaces = {};
+   for (
+     const { name, address, netmask, family, mac, scopeid, cidr } of Deno
+       .networkInterfaces()
+   ) {
+     const addresses = interfaces[name] ||= [];
+-    const networkAddress: NetworkAddress = {
++    const networkAddress = {
+       address,
+       netmask,
+       family,
+@@ -228,40 +131,34 @@ export function networkInterfaces(): NetworkInterfaces {
+       cidr,
+     };
+     if (family === "IPv6") {
+-      networkAddress.scopeid = scopeid!;
++      networkAddress.scopeid = scopeid;
+     }
+     addresses.push(networkAddress);
+   }
+   return interfaces;
+ }
+ 
+-function isIPv4LoopbackAddr(addr: string) {
++function isIPv4LoopbackAddr(addr) {
+   return addr.startsWith("127");
+ }
+ 
+-function isIPv6LoopbackAddr(addr: string) {
++function isIPv6LoopbackAddr(addr) {
+   return addr === "::1" || addr === "fe80::1";
+ }
+ 
+-/** Returns the a string identifying the operating system platform. The value is set at compile time. Possible values are 'darwin', 'linux', and 'win32'. */
+-export function platform(): string {
++function platform() {
+   return process.platform;
+ }
+ 
+-/** Returns the operating system as a string */
+-export function release(): string {
++function release() {
+   return Deno.osRelease();
+ }
+ 
+-/** Returns a string identifying the kernel version */
+-export function version(): string {
+-  // TODO(kt3k): Temporarily uses Deno.osRelease().
+-  // Revisit this if this implementation is insufficient for any npm module
++function version() {
+   return Deno.osRelease();
+ }
+ 
+-/** Returns the machine type as a string */
+-export function machine(): string {
++function machine() {
+   if (Deno.build.arch == "aarch64") {
+     return "arm64";
+   }
+@@ -269,10 +166,7 @@ export function machine(): string {
+   return Deno.build.arch;
+ }
+ 
+-/** Not yet implemented */
+-export function setPriority(pid: number, priority?: number) {
+-  /* The node API has the 'pid' as the first parameter and as optional.
+-       This makes for a problematic implementation in Typescript. */
++function setPriority(pid, priority) {
+   if (priority === undefined) {
+     priority = pid;
+     pid = 0;
+@@ -284,17 +178,11 @@ export function setPriority(pid: number, priority?: number) {
+   try {
+     op_node_os_set_priority(pid, priority);
+   } catch (error) {
+-    throw denoErrorToNodeSystemError(error as Error, "uv_os_setpriority");
++    throw denoErrorToNodeSystemError(error, "uv_os_setpriority");
+   }
+ }
+ 
+-/** Returns the operating system's default directory for temporary files as a string. */
+-export function tmpdir(): string | null {
+-  /* This follows the node js implementation, but has a few
+-     differences:
+-     * We use a plain Deno.env.get, instead of safeGetenv,
+-       which special cases setuid binaries.
+-  */
++function tmpdir() {
+   if (isWindows) {
+     let temp = Deno.env.get("TEMP") || Deno.env.get("TMP") ||
+       (Deno.env.get("SystemRoot") || Deno.env.get("windir")) + "\\temp";
+@@ -306,7 +194,7 @@ export function tmpdir(): string | null {
+     }
+ 
+     return temp;
+-  } else { // !isWindows
++  } else {
+     let temp = Deno.env.get("TMPDIR") || Deno.env.get("TMP") ||
+       Deno.env.get("TEMP") || "/tmp";
+     if (temp.length > 1 && StringPrototypeEndsWith(temp, "/")) {
+@@ -316,14 +204,12 @@ export function tmpdir(): string | null {
+   }
+ }
+ 
+-/** Return total physical memory amount */
+-export function totalmem(): number {
++function totalmem() {
+   return Deno.systemMemoryInfo().total;
+ }
+ 
+-/** Returns operating system type (i.e. 'Windows_NT', 'Linux', 'Darwin') */
+-export function type(): string {
+-  switch (Deno.build.os as string) {
++function type() {
++  switch (Deno.build.os) {
+     case "windows":
+       return "Windows_NT";
+     case "linux":
+@@ -340,14 +226,13 @@ export function type(): string {
+   }
+ }
+ 
+-/** Returns the Operating System uptime in number of seconds. */
+-export function uptime(): number {
++function uptime() {
+   return osUptime();
+ }
+ 
+-export function userInfo(
+-  options: UserInfoOptions = { encoding: "utf-8" },
+-): UserInfo {
++function userInfo(
++  options = { encoding: "utf-8" },
++) {
+   let uid = Deno.uid();
+   let gid = Deno.gid();
+ 
+@@ -355,10 +240,10 @@ export function userInfo(
+     uid = -1;
+     gid = -1;
+   }
+-  let { username, homedir, shell } = op_node_os_user_info(uid);
++  let { username, homedir: hd, shell } = op_node_os_user_info(uid);
+ 
+   if (options?.encoding === "buffer") {
+-    homedir = homedir ? Buffer.from(homedir) : homedir;
++    hd = hd ? Buffer.from(hd) : hd;
+     shell = shell ? Buffer.from(shell) : shell;
+     username = Buffer.from(username);
+   }
+@@ -366,19 +251,18 @@ export function userInfo(
+   return {
+     uid,
+     gid,
+-    homedir,
++    homedir: hd,
+     shell,
+     username,
+   };
+ }
+ 
+-/* Returns an estimate of the default amount of parallelism a program should use. */
+-export function availableParallelism(): number {
++function availableParallelism() {
+   return navigator.hardwareConcurrency;
+ }
+ 
+-export const EOL = isWindows ? "\r\n" : "\n";
+-export const devNull = isWindows ? "\\\\.\\nul" : "/dev/null";
++const EOL = isWindows ? "\r\n" : "\n";
++const devNull = isWindows ? "\\\\.\\nul" : "/dev/null";
+ 
+ const mod = {
+   availableParallelism,
+@@ -426,6 +310,31 @@ ObjectDefineProperties(mod, {
+   },
+ });
+ 
+-// NB(Tango992): we want to have a default exports from this module for ES imports,
+-// as well as make it work with `require` in such a way that the object properties are set correctly.
+-export { mod as "module.exports", mod as default };
++return {
++  "module.exports": mod,
++  constants,
++  arch,
++  cpus,
++  endianness,
++  freemem,
++  getPriority,
++  homedir,
++  hostname,
++  loadavg,
++  networkInterfaces,
++  machine,
++  platform,
++  release,
++  setPriority,
++  tmpdir,
++  totalmem,
++  type,
++  uptime,
++  userInfo,
++  version,
++  availableParallelism,
++  EOL,
++  devNull,
++  default: mod,
++};
++})();
+diff --git a/ext/node/polyfills/os_esm.ts b/ext/node/polyfills/os_esm.ts
+new file mode 100644
+index 00000000000000..5ca280f51b8de5
+--- /dev/null
++++ b/ext/node/polyfills/os_esm.ts
+@@ -0,0 +1,31 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/os.ts");
++
++export const {
++  constants,
++  arch,
++  cpus,
++  endianness,
++  freemem,
++  getPriority,
++  homedir,
++  hostname,
++  loadavg,
++  networkInterfaces,
++  machine,
++  platform,
++  release,
++  setPriority,
++  tmpdir,
++  totalmem,
++  type,
++  uptime,
++  userInfo,
++  version,
++  availableParallelism,
++  EOL,
++  devNull,
++} = mod;
++
++export default mod.default;
+diff --git a/ext/node/polyfills/stream/consumers.js b/ext/node/polyfills/stream/consumers.js
+index cd90f58a2e1f01..99d8f5e00a9609 100644
+--- a/ext/node/polyfills/stream/consumers.js
++++ b/ext/node/polyfills/stream/consumers.js
+@@ -1,7 +1,8 @@
+ // deno-lint-ignore-file
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-import { core, primordials } from "ext:core/mod.js";
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
+ const { TextDecoder } = core.loadExtScript("ext:deno_web/08_text_encoding.js");
+ const { Blob } = core.loadExtScript("ext:deno_web/09_file.js");
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+@@ -27,16 +28,6 @@ function validateStreamIterator(stream) {
+   }
+ }
+ 
+-/**
+- * @typedef {import('../internal/webstreams/readablestream').ReadableStream
+- * } ReadableStream
+- * @typedef {import('../internal/streams/readable')} Readable
+- */
+-
+-/**
+- * @param {AsyncIterable|ReadableStream|Readable} stream
+- * @returns {Promise<Blob>}
+- */
+ async function blob(stream) {
+   const chunks = [];
+   const iter = validateStreamIterator(stream);
+@@ -46,35 +37,19 @@ async function blob(stream) {
+   return new Blob(chunks);
+ }
+ 
+-/**
+- * @param {AsyncIterable|ReadableStream|Readable} stream
+- * @returns {Promise<ArrayBuffer>}
+- */
+ async function arrayBuffer(stream) {
+   const ret = await blob(stream);
+   return ret.arrayBuffer();
+ }
+ 
+-/**
+- * @param {AsyncIterable|ReadableStream|Readable} stream
+- * @returns {Promise<Buffer>}
+- */
+ async function buffer(stream) {
+   return Buffer.from(await arrayBuffer(stream));
+ }
+ 
+-/**
+- * @param {AsyncIterable|ReadableStream|Readable} stream
+- * @returns {Promise<Uint8Array>}
+- */
+ async function bytes(stream) {
+   return new Uint8Array(await arrayBuffer(stream));
+ }
+ 
+-/**
+- * @param {AsyncIterable|ReadableStream|Readable} stream
+- * @returns {Promise<string>}
+- */
+ async function text(stream) {
+   const dec = new TextDecoder();
+   let str = "";
+@@ -99,16 +74,12 @@ async function text(stream) {
+   return str;
+ }
+ 
+-/**
+- * @param {AsyncIterable|ReadableStream|Readable} stream
+- * @returns {Promise<any>}
+- */
+ async function json(stream) {
+   const str = await text(stream);
+   return JSONParse(str);
+ }
+ 
+-const _defaultExport1 = {
++return {
+   arrayBuffer,
+   blob,
+   buffer,
+@@ -116,6 +87,4 @@ const _defaultExport1 = {
+   text,
+   json,
+ };
+-
+-export default _defaultExport1;
+-export { arrayBuffer, blob, buffer, bytes, json, text };
++})();
+diff --git a/ext/node/polyfills/stream/consumers_esm.js b/ext/node/polyfills/stream/consumers_esm.js
+new file mode 100644
+index 00000000000000..b94a28d99702fe
+--- /dev/null
++++ b/ext/node/polyfills/stream/consumers_esm.js
+@@ -0,0 +1,14 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/stream/consumers.js");
++
++export const {
++  arrayBuffer,
++  blob,
++  buffer,
++  bytes,
++  text,
++  json,
++} = mod;
++
++export default mod;
+diff --git a/ext/node/polyfills/stream/web.js b/ext/node/polyfills/stream/web.js
+index 9099f9e24baea8..5cd5de6b8f3098 100644
+--- a/ext/node/polyfills/stream/web.js
++++ b/ext/node/polyfills/stream/web.js
+@@ -1,7 +1,8 @@
+ // deno-lint-ignore-file
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-import { core } from "ext:core/mod.js";
++(function () {
++const { core } = globalThis.__bootstrap;
+ const {
+   TransformStream,
+   TransformStreamDefaultController,
+@@ -25,9 +26,8 @@ const {
+   CompressionStream,
+   DecompressionStream,
+ } = core.loadExtScript("ext:deno_web/14_compression.js");
+-"use strict";
+ 
+-const _defaultExport1 = {
++return {
+   ReadableStream,
+   ReadableStreamDefaultReader,
+   ReadableStreamBYOBReader,
+@@ -46,24 +46,4 @@ const _defaultExport1 = {
+   CompressionStream,
+   DecompressionStream,
+ };
+-
+-export default _defaultExport1;
+-export {
+-  ByteLengthQueuingStrategy,
+-  CompressionStream,
+-  CountQueuingStrategy,
+-  DecompressionStream,
+-  ReadableByteStreamController,
+-  ReadableStream,
+-  ReadableStreamBYOBReader,
+-  ReadableStreamBYOBRequest,
+-  ReadableStreamDefaultController,
+-  ReadableStreamDefaultReader,
+-  TextDecoderStream,
+-  TextEncoderStream,
+-  TransformStream,
+-  TransformStreamDefaultController,
+-  WritableStream,
+-  WritableStreamDefaultController,
+-  WritableStreamDefaultWriter,
+-};
++})();
+diff --git a/ext/node/polyfills/stream/web_esm.js b/ext/node/polyfills/stream/web_esm.js
+new file mode 100644
+index 00000000000000..f5b38ffa029774
+--- /dev/null
++++ b/ext/node/polyfills/stream/web_esm.js
+@@ -0,0 +1,25 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/stream/web.js");
++
++export const {
++  ByteLengthQueuingStrategy,
++  CompressionStream,
++  CountQueuingStrategy,
++  DecompressionStream,
++  ReadableByteStreamController,
++  ReadableStream,
++  ReadableStreamBYOBReader,
++  ReadableStreamBYOBRequest,
++  ReadableStreamDefaultController,
++  ReadableStreamDefaultReader,
++  TextDecoderStream,
++  TextEncoderStream,
++  TransformStream,
++  TransformStreamDefaultController,
++  WritableStream,
++  WritableStreamDefaultController,
++  WritableStreamDefaultWriter,
++} = mod;
++
++export default mod;
+diff --git a/ext/node/polyfills/string_decoder.ts b/ext/node/polyfills/string_decoder.ts
+index 84ddd0b1cfae6e..11b549ab01769a 100644
+--- a/ext/node/polyfills/string_decoder.ts
++++ b/ext/node/polyfills/string_decoder.ts
+@@ -23,8 +23,13 @@
+ // Logic and comments translated pretty much one-to-one from node's impl
+ // (https://github.com/nodejs/node/blob/ba06c5c509956dc413f91b755c1c93798bb700d4/src/string_decoder.cc)
+ 
+-import { Buffer, constants } from "node:buffer";
+-import { core, primordials } from "ext:core/mod.js";
++// deno-lint-ignore-file prefer-primordials
++
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
++const bufMod = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
++const { Buffer } = bufMod;
++const { MAX_LENGTH: MAX_STRING_LENGTH } = bufMod.constants;
+ const { normalizeEncoding: castEncoding } = core.loadExtScript(
+   "ext:deno_node/internal/util.mjs",
+ );
+@@ -53,34 +58,32 @@ const {
+ } = primordials;
+ const { isTypedArray } = core;
+ 
+-const { MAX_STRING_LENGTH } = constants;
+-
+-// to cast from string to `BufferEncoding`, which doesn't seem nameable from here
+-// deno-lint-ignore no-explicit-any
+-type Any = any;
++const ENCODING_UTF8 = 0;
++const ENCODING_BASE64 = 1;
++const ENCODING_BASE64URL = 2;
++const ENCODING_UTF16 = 3;
++const ENCODING_ASCII = 4;
++const ENCODING_LATIN1 = 5;
++const ENCODING_HEX = 6;
+ 
+-function normalizeEncoding(enc?: string): string {
++function normalizeEncoding(enc) {
+   const encoding = castEncoding(enc ?? null);
+   if (!encoding) {
+     if (typeof enc !== "string" || StringPrototypeToLowerCase(enc) !== "raw") {
+       throw new ERR_UNKNOWN_ENCODING(
+-        enc as Any,
++        enc,
+       );
+     }
+   }
+   return String(encoding);
+ }
+ 
+-/**
+- * Check is `ArrayBuffer` and not `TypedArray`. Typescript allowed `TypedArray` to be passed as `ArrayBuffer` and does not do a deep check
+- */
+-
+-function isBufferType(buf: Buffer) {
++function isBufferType(buf) {
+   return ObjectPrototypeIsPrototypeOf(Buffer.prototype, buf) &&
+     buf.BYTES_PER_ELEMENT;
+ }
+ 
+-function normalizeBuffer(buf: Buffer) {
++function normalizeBuffer(buf) {
+   if (!ArrayBufferIsView(buf)) {
+     throw new ERR_INVALID_ARG_TYPE(
+       "buf",
+@@ -109,12 +112,7 @@ function normalizeBuffer(buf: Buffer) {
+ }
+ 
+ const maxStringLengthHex = NumberPrototypeToString(MAX_STRING_LENGTH, 16);
+-function bufferToString(
+-  buf: Buffer,
+-  encoding?: string,
+-  start?: number,
+-  end?: number,
+-): string {
++function bufferToString(buf, encoding, start, end) {
+   const len = (end ?? buf.length) - (start ?? 0);
+   if (len > MAX_STRING_LENGTH) {
+     throw new NodeError(
+@@ -122,13 +120,13 @@ function bufferToString(
+       `Cannot create a string longer than 0x${maxStringLengthHex} characters`,
+     );
+   }
+-  // deno-lint-ignore prefer-primordials
+-  return buf.toString(encoding as Any, start, end);
++  return buf.toString(encoding, start, end);
+ }
+ 
+-// the heart of the logic, decodes a buffer, storing
+-// incomplete characters in a buffer if applicable
+-function decode(this: StringDecoder, buf: Buffer) {
++const kBufferedBytes = Symbol("bufferedBytes");
++const kMissingBytes = Symbol("missingBytes");
++
++function decode(buf) {
+   const enc = this.enc;
+ 
+   let bufIdx = 0;
+@@ -138,25 +136,17 @@ function decode(this: StringDecoder, buf: Buffer) {
+   let rest = "";
+ 
+   if (
+-    enc === Encoding.Utf8 || enc === Encoding.Utf16 ||
+-    enc === Encoding.Base64 || enc === Encoding.Base64Url
++    enc === ENCODING_UTF8 || enc === ENCODING_UTF16 ||
++    enc === ENCODING_BASE64 || enc === ENCODING_BASE64URL
+   ) {
+-    // check if we need to finish an incomplete char from the last chunk
+-    // written. If we do, we copy the bytes into our `lastChar` buffer
+-    // and prepend the completed char to the result of decoding the rest of the buffer
+     if (this[kMissingBytes] > 0) {
+-      if (enc === Encoding.Utf8) {
+-        // Edge case for incomplete character at a chunk boundary
+-        // (see https://github.com/nodejs/node/blob/73025c4dec042e344eeea7912ed39f7b7c4a3991/src/string_decoder.cc#L74)
++      if (enc === ENCODING_UTF8) {
+         for (
+           let i = 0;
+           i < buf.length - bufIdx && i < this[kMissingBytes];
+           i++
+         ) {
+           if ((buf[i] & 0xC0) !== 0x80) {
+-            // We expected a continuation byte, but got something else.
+-            // Stop trying to decode the incomplete char, and assume
+-            // the byte we got starts a new char.
+             this[kMissingBytes] = 0;
+             buf.copy(this.lastChar, this[kBufferedBytes], bufIdx, bufIdx + i);
+             this[kBufferedBytes] += i;
+@@ -180,42 +170,29 @@ function decode(this: StringDecoder, buf: Buffer) {
+       this[kMissingBytes] -= bytesToCopy;
+ 
+       if (this[kMissingBytes] === 0) {
+-        // we have all the bytes, complete the char
+         prepend = bufferToString(
+           this.lastChar,
+           this.encoding,
+           0,
+           this[kBufferedBytes],
+         );
+-        // reset the char buffer
+         this[kBufferedBytes] = 0;
+       }
+     }
+ 
+     if (buf.length - bufIdx === 0) {
+-      // we advanced the bufIdx, so we may have completed the
+-      // incomplete char
+       rest = prepend.length > 0 ? prepend : "";
+       prepend = "";
+     } else {
+-      // no characters left to finish
+-
+-      // check if the end of the buffer has an incomplete
+-      // character, if so we write it into our `lastChar` buffer and
+-      // truncate buf
+-      if (enc === Encoding.Utf8 && (buf[buf.length - 1] & 0x80)) {
++      if (enc === ENCODING_UTF8 && (buf[buf.length - 1] & 0x80)) {
+         for (let i = buf.length - 1;; i--) {
+           this[kBufferedBytes] += 1;
+           if ((buf[i] & 0xC0) === 0x80) {
+-            // Doesn't start a character (i.e. it's a trailing byte)
+             if (this[kBufferedBytes] >= 4 || i === 0) {
+-              // invalid utf8, we'll just pass it to the underlying decoder
+               this[kBufferedBytes] = 0;
+               break;
+             }
+           } else {
+-            // First byte of a UTF-8 char, check
+-            // to see how long it should be
+             if ((buf[i] & 0xE0) === 0xC0) {
+               this[kMissingBytes] = 2;
+             } else if ((buf[i] & 0xF0) === 0xE0) {
+@@ -223,14 +200,11 @@ function decode(this: StringDecoder, buf: Buffer) {
+             } else if ((buf[i] & 0xF8) === 0xF0) {
+               this[kMissingBytes] = 4;
+             } else {
+-              // invalid
+               this[kBufferedBytes] = 0;
+               break;
+             }
+ 
+             if (this[kBufferedBytes] >= this[kMissingBytes]) {
+-              // We have enough trailing bytes to complete
+-              // the char
+               this[kMissingBytes] = 0;
+               this[kBufferedBytes] = 0;
+             }
+@@ -239,17 +213,15 @@ function decode(this: StringDecoder, buf: Buffer) {
+             break;
+           }
+         }
+-      } else if (enc === Encoding.Utf16) {
++      } else if (enc === ENCODING_UTF16) {
+         if ((buf.length - bufIdx) % 2 === 1) {
+-          // Have half of a code unit
+           this[kBufferedBytes] = 1;
+           this[kMissingBytes] = 1;
+         } else if ((buf[buf.length - 1] & 0xFC) === 0xD8) {
+-          // 2 bytes out of a 4 byte UTF-16 char
+           this[kBufferedBytes] = 2;
+           this[kMissingBytes] = 2;
+         }
+-      } else if (enc === Encoding.Base64 || enc === Encoding.Base64Url) {
++      } else if (enc === ENCODING_BASE64 || enc === ENCODING_BASE64URL) {
+         this[kBufferedBytes] = (buf.length - bufIdx) % 3;
+         if (this[kBufferedBytes] > 0) {
+           this[kMissingBytes] = 3 - this[kBufferedBytes];
+@@ -257,8 +229,6 @@ function decode(this: StringDecoder, buf: Buffer) {
+       }
+ 
+       if (this[kBufferedBytes] > 0) {
+-        // Copy the bytes that make up the incomplete char
+-        // from the end of the buffer into our `lastChar` buffer
+         buf.copy(
+           this.lastChar,
+           0,
+@@ -280,11 +250,10 @@ function decode(this: StringDecoder, buf: Buffer) {
+   }
+ }
+ 
+-function flush(this: StringDecoder) {
++function flush() {
+   const enc = this.enc;
+ 
+-  if (enc === Encoding.Utf16 && this[kBufferedBytes] % 2 === 1) {
+-    // ignore trailing byte if it isn't a complete code unit (2 bytes)
++  if (enc === ENCODING_UTF16 && this[kBufferedBytes] % 2 === 1) {
+     this[kBufferedBytes] -= 1;
+     this[kMissingBytes] -= 1;
+   }
+@@ -306,73 +275,37 @@ function flush(this: StringDecoder) {
+   return ret;
+ }
+ 
+-enum Encoding {
+-  Utf8,
+-  Base64,
+-  Base64Url,
+-  Utf16,
+-  Ascii,
+-  Latin1,
+-  Hex,
+-}
+-
+-const kBufferedBytes = Symbol("bufferedBytes");
+-const kMissingBytes = Symbol("missingBytes");
+-
+-type StringDecoder = {
+-  encoding: string;
+-  end: (buf: Buffer) => string;
+-  write: (buf: Buffer) => string;
+-  lastChar: Buffer;
+-  lastNeed: number;
+-  lastTotal: number;
+-  text: (buf: Buffer, idx: number) => string;
+-  enc: Encoding;
+-
+-  decode: (buf: Buffer) => string;
+-
+-  [kBufferedBytes]: number;
+-  [kMissingBytes]: number;
+-
+-  flush: () => string;
+-};
+-
+-/*
+- * StringDecoder provides an interface for efficiently splitting a series of
+- * buffers into a series of JS strings without breaking apart multi-byte
+- * characters.
+- */
+-export function StringDecoder(this: Partial<StringDecoder>, encoding?: string) {
++function StringDecoder(encoding) {
+   const normalizedEncoding = normalizeEncoding(encoding);
+-  let enc: Encoding = Encoding.Utf8;
++  let enc = ENCODING_UTF8;
+   let bufLen = 0;
+   switch (normalizedEncoding) {
+     case "utf8":
+-      enc = Encoding.Utf8;
++      enc = ENCODING_UTF8;
+       bufLen = 4;
+       break;
+     case "base64":
+-      enc = Encoding.Base64;
++      enc = ENCODING_BASE64;
+       bufLen = 4;
+       break;
+     case "base64url":
+-      enc = Encoding.Base64Url;
++      enc = ENCODING_BASE64URL;
+       bufLen = 4;
+       break;
+     case "utf16le":
+-      enc = Encoding.Utf16;
++      enc = ENCODING_UTF16;
+       bufLen = 4;
+       break;
+     case "hex":
+-      enc = Encoding.Hex;
++      enc = ENCODING_HEX;
+       bufLen = 0;
+       break;
+     case "latin1":
+-      enc = Encoding.Latin1;
++      enc = ENCODING_LATIN1;
+       bufLen = 0;
+       break;
+     case "ascii":
+-      enc = Encoding.Ascii;
++      enc = ENCODING_ASCII;
+       bufLen = 0;
+       break;
+   }
+@@ -385,11 +318,7 @@ export function StringDecoder(this: Partial<StringDecoder>, encoding?: string) {
+   this.decode = decode;
+ }
+ 
+-/**
+- * Returns a decoded string, omitting any incomplete multi-bytes
+- * characters at the end of the Buffer, or TypedArray, or DataView
+- */
+-StringDecoder.prototype.write = function write(buf: Buffer): string {
++StringDecoder.prototype.write = function write(buf) {
+   if (typeof buf === "string") {
+     return buf;
+   }
+@@ -400,12 +329,7 @@ StringDecoder.prototype.write = function write(buf: Buffer): string {
+   return this.decode(normalizedBuf);
+ };
+ 
+-/**
+- * Returns any remaining input stored in the internal buffer as a string.
+- * After end() is called, the stringDecoder object can be reused for new
+- * input.
+- */
+-StringDecoder.prototype.end = function end(buf: Buffer): string {
++StringDecoder.prototype.end = function end(buf) {
+   let ret = "";
+   if (buf !== undefined) {
+     ret = this.write(buf);
+@@ -416,12 +340,7 @@ StringDecoder.prototype.end = function end(buf: Buffer): string {
+   return ret;
+ };
+ 
+-// Below is undocumented but accessible stuff from node's old impl
+-// (node's tests assert on these, so we need to support them)
+-StringDecoder.prototype.text = function text(
+-  buf: Buffer,
+-  offset: number,
+-): string {
++StringDecoder.prototype.text = function text(buf, offset) {
+   this[kBufferedBytes] = 0;
+   this[kMissingBytes] = 0;
+   return this.write(buf.subarray(offset));
+@@ -432,7 +351,7 @@ ObjectDefineProperties(StringDecoder.prototype, {
+     __proto__: null,
+     configurable: true,
+     enumerable: true,
+-    get(this: StringDecoder): number {
++    get() {
+       return this[kMissingBytes];
+     },
+   },
+@@ -440,10 +359,14 @@ ObjectDefineProperties(StringDecoder.prototype, {
+     __proto__: null,
+     configurable: true,
+     enumerable: true,
+-    get(this: StringDecoder): number {
++    get() {
+       return this[kBufferedBytes] + this[kMissingBytes];
+     },
+   },
+ });
+ 
+-export default { StringDecoder };
++return {
++  StringDecoder,
++  default: { StringDecoder },
++};
++})();
+diff --git a/ext/node/polyfills/string_decoder_esm.ts b/ext/node/polyfills/string_decoder_esm.ts
+new file mode 100644
+index 00000000000000..e83d9b76e8608f
+--- /dev/null
++++ b/ext/node/polyfills/string_decoder_esm.ts
+@@ -0,0 +1,7 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/string_decoder.ts");
++
++export const { StringDecoder } = mod;
++
++export default mod.default;
+diff --git a/ext/node/polyfills/test/reporters.ts b/ext/node/polyfills/test/reporters.ts
+index 579aceb8909398..cc7e94b834290a 100644
+--- a/ext/node/polyfills/test/reporters.ts
++++ b/ext/node/polyfills/test/reporters.ts
+@@ -3,4 +3,6 @@
+ // Stub for node:test/reporters.
+ // Currently not supported in Deno.
+ 
+-export default {};
++(function () {
++return {};
++})();
+diff --git a/ext/node/polyfills/test/reporters_esm.ts b/ext/node/polyfills/test/reporters_esm.ts
+new file mode 100644
+index 00000000000000..01c1df370037aa
+--- /dev/null
++++ b/ext/node/polyfills/test/reporters_esm.ts
+@@ -0,0 +1,5 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/test/reporters.ts");
++
++export default mod;
+diff --git a/ext/node/polyfills/testing.ts b/ext/node/polyfills/testing.ts
+index aab0cfff6f546e..00f95184fda302 100644
+--- a/ext/node/polyfills/testing.ts
++++ b/ext/node/polyfills/testing.ts
+@@ -1,6 +1,9 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-import { core, primordials } from "ext:core/mod.js";
++// deno-lint-ignore-file prefer-primordials
++
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
+ const {
+   ArrayPrototypeForEach,
+   ArrayPrototypeIndexOf,
+@@ -26,44 +29,24 @@ const {
+   TypeError,
+ } = primordials;
+ 
+-// --------------------------------------------------------------------------
+-// Unhandled rejection / uncaught exception handling for node:test
+-// --------------------------------------------------------------------------
+-// In Node.js, unhandled rejections and uncaught exceptions during a test
+-// cause test warnings rather than crashing the runner. In Deno, they're
+-// fatal for the entire module. We install global handlers that prevent
+-// Deno from treating them as fatal module errors.
+-
+ let errorHandlersInstalled = false;
+ 
+-// Tracks the number of node:test tests currently executing. The global error
+-// handlers only suppress events while at least one test is running, so they
+-// don't interfere with Deno.test or other code after node:test completes.
+ let activeNodeTests = 0;
+ 
+-// When a callback-style test is in progress, this holds a reject function
+-// so that caught async errors can unblock the pending done() callback.
+-// node:test tests run sequentially via Deno.test (one top-level test at a
+-// time), so only one callback test can be pending at any given moment.
+-let pendingCallbackReject: ((err: unknown) => void) | null = null;
++let pendingCallbackReject = null;
+ 
+-// Non-Error thrown values with a custom inspect that throws can crash
+-// Deno's error formatting. Test the actual formatting path before
+-// re-throwing to Deno.test.
+-function sanitizeThrowValue(err: unknown): unknown {
++function sanitizeThrowValue(err) {
+   if (err === null || err === undefined || typeof err !== "object") {
+     return err;
+   }
+   if (ObjectPrototypeIsPrototypeOf(ErrorPrototype, err)) {
+     return err;
+   }
+-  // Only objects with a custom inspect symbol need validation
+   const inspectSymbol = SymbolFor("nodejs.util.inspect.custom");
+-  if (typeof (err as Record<symbol, unknown>)[inspectSymbol] !== "function") {
++  if (typeof err[inspectSymbol] !== "function") {
+     return err;
+   }
+   try {
+-    // Test the actual formatting path that Deno's error reporter uses
+     Deno.inspect(err);
+     return err;
+   } catch {
+@@ -87,7 +70,6 @@ function installErrorHandlers() {
+     if (activeNodeTests > 0) {
+       event.preventDefault();
+     }
+-    // If a callback test is pending, unblock it so the test doesn't hang
+     if (pendingCallbackReject !== null) {
+       pendingCallbackReject(event.error ?? new Error("uncaught error"));
+       pendingCallbackReject = null;
+@@ -122,7 +104,6 @@ const methodsToCopy = [
+   "ok",
+ ];
+ 
+-/** `assert` object available via t.assert */
+ let assertObject = undefined;
+ function getAssertObject() {
+   if (assertObject === undefined) {
+@@ -134,7 +115,7 @@ function getAssertObject() {
+   return assertObject;
+ }
+ 
+-export function run() {
++function run() {
+   notImplemented("test.run");
+ }
+ 
+@@ -143,10 +124,10 @@ function noop() {}
+ const skippedSymbol = Symbol("skipped");
+ 
+ class TestPlan {
+-  #expected: number;
+-  #actual: number = 0;
++  #expected;
++  #actual = 0;
+ 
+-  constructor(count: number) {
++  constructor(count) {
+     this.#expected = count;
+   }
+ 
+@@ -164,23 +145,19 @@ class TestPlan {
+ }
+ 
+ class NodeTestContext {
+-  #denoContext: Deno.TestContext;
+-  #afterHooks: (() => void)[] = [];
+-  #beforeHooks: (() => void)[] = [];
+-  #parent: NodeTestContext | undefined;
++  #denoContext;
++  #afterHooks = [];
++  #beforeHooks = [];
++  #parent;
+   #skipped = false;
+-  #name: string;
+-  #abortController: AbortController = new AbortController();
+-  #plan: TestPlan | undefined;
+-  #planAssert: Record<string, unknown> | undefined;
+-  #beforeEachHooks: (() => void | Promise<void>)[] = [];
+-  #afterEachHooks: (() => void | Promise<void>)[] = [];
+-
+-  constructor(
+-    t: Deno.TestContext,
+-    parent: NodeTestContext | undefined,
+-    name: string,
+-  ) {
++  #name;
++  #abortController = new AbortController();
++  #plan;
++  #planAssert;
++  #beforeEachHooks = [];
++  #afterEachHooks = [];
++
++  constructor(t, parent, name) {
+     this.#denoContext = t;
+     this.#parent = parent;
+     this.#name = name;
+@@ -209,7 +186,7 @@ class NodeTestContext {
+     return getAssertObject();
+   }
+ 
+-  plan(count: number) {
++  plan(count) {
+     validateInteger(count, "count", 1);
+     this.#plan = new TestPlan(count);
+   }
+@@ -259,8 +236,6 @@ class NodeTestContext {
+ 
+   test(name, options, fn) {
+     const prepared = prepareOptions(name, options, fn, {});
+-    // Subtests count toward the parent's plan (Node counts both
+-    // assertions and subtests).
+     if (this.#plan) this.#plan.increment();
+     // deno-lint-ignore no-this-alias
+     const parentContext = this;
+@@ -350,26 +325,17 @@ class NodeTestContext {
+   }
+ }
+ 
+-let currentSuite: TestSuite | null = null;
+-
+-// Entries are step definitions collected during the suite body. Steps are
+-// not created via t.step() until the suite executes, so that before/after
+-// hooks run at the correct time.
+-interface SuiteEntry {
+-  name: string;
+-  fn: (t: Deno.TestContext) => Promise<void> | void;
+-  ignore: boolean;
+-}
++let currentSuite = null;
+ 
+ class TestSuite {
+-  #denoTestContext: Deno.TestContext;
+-  entries: SuiteEntry[] = [];
+-  beforeAllHooks: (() => void | Promise<void>)[] = [];
+-  afterAllHooks: (() => void | Promise<void>)[] = [];
+-  beforeEachHooks: (() => void | Promise<void>)[] = [];
+-  afterEachHooks: (() => void | Promise<void>)[] = [];
+-
+-  constructor(t: Deno.TestContext) {
++  #denoTestContext;
++  entries = [];
++  beforeAllHooks = [];
++  afterAllHooks = [];
++  beforeEachHooks = [];
++  afterEachHooks = [];
++
++  constructor(t) {
+     this.#denoTestContext = t;
+   }
+ 
+@@ -410,7 +376,6 @@ class TestSuite {
+ 
+   addSuite(name, options, fn, overrides) {
+     const prepared = prepareOptions(name, options, fn, overrides);
+-    // deno-lint-ignore prefer-primordials
+     const { promise, resolve } = Promise.withResolvers();
+     ArrayPrototypePush(this.entries, {
+       name: prepared.name,
+@@ -449,8 +414,6 @@ function prepareOptions(name, options, fn, overrides) {
+   }
+ 
+   const finalOptions = { ...options, ...overrides };
+-  // TODO(bartlomieju): these options are currently not handled
+-  // const { concurrency, timeout, signal } = finalOptions;
+ 
+   if (typeof fn !== "function") {
+     fn = noop;
+@@ -468,11 +431,9 @@ function wrapTestFn(fn, resolve, name) {
+     const nodeTestContext = new NodeTestContext(t, undefined, name);
+     try {
+       if (fn.length >= 2) {
+-        // Callback-style test
+         await new Promise((testResolve, testReject) => {
+-          // Allow error handler to unblock this test if an async throw occurs
+           pendingCallbackReject = testReject;
+-          const done = (err?: Error) => {
++          const done = (err) => {
+             pendingCallbackReject = null;
+             if (err) {
+               testReject(err);
+@@ -485,8 +446,6 @@ function wrapTestFn(fn, resolve, name) {
+               nodeTestContext,
+               done,
+             ]);
+-            // If the function returns a thenable (async fn with done callback),
+-            // also listen for its rejection to avoid hanging
+             if (
+               result !== null && result !== undefined &&
+               typeof result.then === "function"
+@@ -502,7 +461,6 @@ function wrapTestFn(fn, resolve, name) {
+           }
+         });
+       } else {
+-        // Promise-style or sync test
+         await ReflectApply(fn, nodeTestContext, [nodeTestContext]);
+       }
+       nodeTestContext._checkPlan();
+@@ -520,12 +478,8 @@ function wrapTestFn(fn, resolve, name) {
+ function prepareDenoTest(name, options, fn, overrides) {
+   const prepared = prepareOptions(name, options, fn, overrides);
+ 
+-  // Increment at registration so handlers stay active until all tests complete.
+-  // Decremented in wrapTestFn's finally block when the test finishes.
+   activeNodeTests++;
+ 
+-  // TODO(iuioiua): Update once there's a primordial for `Promise.withResolvers()`.
+-  // deno-lint-ignore prefer-primordials
+   const { promise, resolve } = Promise.withResolvers();
+ 
+   const denoTestOptions = {
+@@ -572,11 +526,8 @@ function wrapSuiteFn(fn, resolve) {
+ function prepareDenoTestForSuite(name, options, fn, overrides) {
+   const prepared = prepareOptions(name, options, fn, overrides);
+ 
+-  // Increment at registration so handlers stay active until all tests complete.
+-  // Decremented in wrapSuiteFn's finally callback when the suite finishes.
+   activeNodeTests++;
+ 
+-  // deno-lint-ignore prefer-primordials
+   const { promise, resolve } = Promise.withResolvers();
+ 
+   const denoTestOptions = {
+@@ -593,7 +544,7 @@ function prepareDenoTestForSuite(name, options, fn, overrides) {
+   return promise;
+ }
+ 
+-export function test(name, options, fn, overrides) {
++function test(name, options, fn, overrides) {
+   installErrorHandlers();
+   if (currentSuite) {
+     return currentSuite.addTest(name, options, fn, overrides);
+@@ -613,7 +564,7 @@ test.only = function only(name, options, fn) {
+   return test(name, options, fn, { only: true });
+ };
+ 
+-export function suite(name, options, fn, overrides) {
++function suite(name, options, fn, overrides) {
+   installErrorHandlers();
+   if (currentSuite) {
+     return currentSuite.addSuite(name, options, fn, overrides);
+@@ -631,12 +582,10 @@ suite.only = function only(name, options, fn) {
+   return suite(name, options, fn, { only: true });
+ };
+ 
+-// Match Node: `it` is just an alias for `test`, and `describe` for `suite`.
+-// See https://github.com/nodejs/node/blob/main/lib/test.js
+-export const it = test;
+-export const describe = suite;
++const it = test;
++const describe = suite;
+ 
+-export function before(fn, _options) {
++function before(fn, _options) {
+   if (typeof fn !== "function") {
+     throw new TypeError("before() requires a function argument");
+   }
+@@ -647,7 +596,7 @@ export function before(fn, _options) {
+   notImplemented("test.before (module-level, outside suite)");
+ }
+ 
+-export function after(fn, _options) {
++function after(fn, _options) {
+   if (typeof fn !== "function") {
+     throw new TypeError("after() requires a function argument");
+   }
+@@ -658,7 +607,7 @@ export function after(fn, _options) {
+   notImplemented("test.after (module-level, outside suite)");
+ }
+ 
+-export function beforeEach(fn, _options) {
++function beforeEach(fn, _options) {
+   if (typeof fn !== "function") {
+     throw new TypeError("beforeEach() requires a function argument");
+   }
+@@ -669,7 +618,7 @@ export function beforeEach(fn, _options) {
+   notImplemented("test.beforeEach (module-level, outside suite)");
+ }
+ 
+-export function afterEach(fn, _options) {
++function afterEach(fn, _options) {
+   if (typeof fn !== "function") {
+     throw new TypeError("afterEach() requires a function argument");
+   }
+@@ -684,59 +633,35 @@ test.it = test;
+ test.describe = suite;
+ test.suite = suite;
+ 
+-// Store all active mocks for restoreAll()
+-const activeMocks: MockFunctionContext[] = [];
+-
+-/** Represents a call to a mock function */
+-interface MockCall {
+-  arguments: unknown[];
+-  error?: Error;
+-  result?: unknown;
+-  stack: Error;
+-  target?: unknown;
+-  this: unknown;
+-}
++const activeMocks = [];
+ 
+-/** Context for a mock function with call tracking */
+ class MockFunctionContext {
+-  #calls: MockCall[] = [];
+-  #implementation: ((...args: unknown[]) => unknown) | undefined;
+-  #restore: (() => void) | undefined;
+-  #times: number | undefined;
+-  #onceImplementations: Map<
+-    number,
+-    (...args: unknown[]) => unknown
+-  > = new SafeMap();
+-
+-  constructor(
+-    implementation?: (...args: unknown[]) => unknown,
+-    restore?: () => void,
+-    times?: number,
+-  ) {
++  #calls = [];
++  #implementation;
++  #restore;
++  #times;
++  #onceImplementations = new SafeMap();
++
++  constructor(implementation, restore, times) {
+     this.#implementation = implementation;
+     this.#restore = restore;
+     this.#times = times;
+   }
+ 
+-  get calls(): readonly MockCall[] {
++  get calls() {
+     return this.#calls;
+   }
+ 
+-  callCount(): number {
++  callCount() {
+     return this.#calls.length;
+   }
+ 
+-  mockImplementation(
+-    implementation: (...args: unknown[]) => unknown,
+-  ): void {
++  mockImplementation(implementation) {
+     validateFunction(implementation, "implementation");
+     this.#implementation = implementation;
+   }
+ 
+-  mockImplementationOnce(
+-    implementation: (...args: unknown[]) => unknown,
+-    onCall?: number,
+-  ): void {
++  mockImplementationOnce(implementation, onCall) {
+     validateFunction(implementation, "implementation");
+     if (onCall !== undefined) {
+       validateInteger(onCall, "onCall", 0);
+@@ -745,11 +670,11 @@ class MockFunctionContext {
+     MapPrototypeSet(this.#onceImplementations, call, implementation);
+   }
+ 
+-  resetCalls(): void {
++  resetCalls() {
+     ArrayPrototypeSplice(this.#calls, 0, this.#calls.length);
+   }
+ 
+-  restore(): void {
++  restore() {
+     if (this.#restore) {
+       this.#restore();
+       this.#restore = undefined;
+@@ -760,12 +685,7 @@ class MockFunctionContext {
+     }
+   }
+ 
+-  _recordCall(
+-    thisArg: unknown,
+-    args: unknown[],
+-    result: unknown,
+-    error?: Error,
+-  ): void {
++  _recordCall(thisArg, args, result, error) {
+     ArrayPrototypePush(this.#calls, {
+       arguments: args,
+       error,
+@@ -775,39 +695,34 @@ class MockFunctionContext {
+     });
+   }
+ 
+-  _shouldMock(): boolean {
++  _shouldMock() {
+     if (this.#times === undefined) return true;
+     return this.#calls.length < this.#times;
+   }
+ 
+-  _getImplementation(): ((...args: unknown[]) => unknown) | undefined {
++  _getImplementation() {
+     return this.#implementation;
+   }
+ 
+-  _nextImpl(): ((...args: unknown[]) => unknown) | undefined {
++  _nextImpl() {
+     const nextCall = this.#calls.length;
+     const onceImpl = MapPrototypeGet(this.#onceImplementations, nextCall);
+     if (onceImpl) {
+       MapPrototypeDelete(this.#onceImplementations, nextCall);
+-      return onceImpl as (...args: unknown[]) => unknown;
++      return onceImpl;
+     }
+     return this.#implementation;
+   }
+ }
+ 
+-/** Creates a mock function wrapper */
+-function createMockFunction(
+-  original: ((...args: unknown[]) => unknown) | undefined,
+-  implementation: ((...args: unknown[]) => unknown) | undefined,
+-  ctx: MockFunctionContext,
+-): (...args: unknown[]) => unknown {
+-  const mockFn = function (this: unknown, ...args: unknown[]): unknown {
++function createMockFunction(original, implementation, ctx) {
++  const mockFn = function (...args) {
+     const impl = ctx._shouldMock()
+       ? (ctx._nextImpl() ?? implementation ?? original)
+       : original;
+ 
+-    let result: unknown;
+-    let error: Error | undefined;
++    let result;
++    let error;
+ 
+     try {
+       result = impl ? ReflectApply(impl, this, args) : undefined;
+@@ -821,7 +736,6 @@ function createMockFunction(
+     return result;
+   };
+ 
+-  // Attach the mock context to the function
+   ObjectDefineProperty(mockFn, "mock", {
+     __proto__: null,
+     value: ctx,
+@@ -833,10 +747,7 @@ function createMockFunction(
+   return mockFn;
+ }
+ 
+-function findPropertyDescriptor(
+-  obj: object,
+-  name: string | symbol,
+-): PropertyDescriptor | undefined {
++function findPropertyDescriptor(obj, name) {
+   let current = obj;
+   while (current !== null && current !== undefined) {
+     const desc = ObjectGetOwnPropertyDescriptor(current, name);
+@@ -846,27 +757,16 @@ function findPropertyDescriptor(
+   return undefined;
+ }
+ 
+-type MockMethodOptions = { times?: number; getter?: boolean; setter?: boolean };
+-
+-function mockMethodImpl<T extends object>(
+-  object: T,
+-  methodName: keyof T,
+-  implementation:
+-    | ((...args: unknown[]) => unknown)
+-    | Record<string, unknown>
+-    | undefined,
+-  options?: MockMethodOptions,
+-): ((...args: unknown[]) => unknown) & { mock: MockFunctionContext } {
+-  // Handle overloaded signature: method(obj, name, options)
++function mockMethodImpl(object, methodName, implementation, options) {
+   if (
+     implementation !== null && typeof implementation === "object" &&
+     typeof implementation !== "function"
+   ) {
+-    options = implementation as MockMethodOptions;
++    options = implementation;
+     implementation = undefined;
+   }
+ 
+-  const descriptor = findPropertyDescriptor(object, methodName as string);
++  const descriptor = findPropertyDescriptor(object, methodName);
+   if (!descriptor) {
+     throw new TypeError(
+       `Cannot mock property '${String(methodName)}' because it does not exist`,
+@@ -876,8 +776,7 @@ function mockMethodImpl<T extends object>(
+   const isGetter = options?.getter ?? false;
+   const isSetter = options?.setter ?? false;
+ 
+-  // deno-lint-ignore no-explicit-any
+-  let original: ((...args: any[]) => any) | undefined;
++  let original;
+   if (isGetter) {
+     original = descriptor.get;
+   } else if (isSetter) {
+@@ -895,24 +794,16 @@ function mockMethodImpl<T extends object>(
+   }
+ 
+   const restore = () => {
+-    ObjectDefineProperty(object, methodName as string, descriptor);
++    ObjectDefineProperty(object, methodName, descriptor);
+   };
+ 
+   const impl = implementation === undefined ? original : implementation;
+-  const ctx = new MockFunctionContext(
+-    impl as (...args: unknown[]) => unknown,
+-    restore,
+-    options?.times,
+-  );
++  const ctx = new MockFunctionContext(impl, restore, options?.times);
+   ArrayPrototypePush(activeMocks, ctx);
+ 
+-  const mockFn = createMockFunction(
+-    original as (...args: unknown[]) => unknown,
+-    impl as (...args: unknown[]) => unknown,
+-    ctx,
+-  );
++  const mockFn = createMockFunction(original, impl, ctx);
+ 
+-  const mockDescriptor: PropertyDescriptor = {
++  const mockDescriptor = {
+     configurable: descriptor.configurable,
+     enumerable: descriptor.enumerable,
+   };
+@@ -928,66 +819,40 @@ function mockMethodImpl<T extends object>(
+     mockDescriptor.value = mockFn;
+   }
+ 
+-  ObjectDefineProperty(object, methodName as string, mockDescriptor);
++  ObjectDefineProperty(object, methodName, mockDescriptor);
+ 
+-  return mockFn as ((...args: unknown[]) => unknown) & {
+-    mock: MockFunctionContext;
+-  };
++  return mockFn;
+ }
+ 
+-export const mock = {
+-  fn: (
+-    original?:
+-      | ((...args: unknown[]) => unknown)
+-      | Record<string, unknown>,
+-    implementation?:
+-      | ((...args: unknown[]) => unknown)
+-      | Record<string, unknown>,
+-    options?: { times?: number },
+-  ): ((...args: unknown[]) => unknown) & { mock: MockFunctionContext } => {
+-    // Handle overloaded signatures: fn(options), fn(original, options)
++const mock = {
++  fn: (original, implementation, options) => {
+     if (original !== null && typeof original === "object") {
+-      options = original as { times?: number };
++      options = original;
+       original = undefined;
+       implementation = undefined;
+     } else if (implementation !== null && typeof implementation === "object") {
+-      options = implementation as { times?: number };
+-      implementation = original as
+-        | ((...args: unknown[]) => unknown)
+-        | undefined;
++      options = implementation;
++      implementation = original;
+     }
+ 
+     const ctx = new MockFunctionContext(
+-      (implementation ?? original) as
+-        | ((...args: unknown[]) => unknown)
+-        | undefined,
++      implementation ?? original,
+       undefined,
+       options?.times,
+     );
+     ArrayPrototypePush(activeMocks, ctx);
+ 
+     const mockFn = createMockFunction(
+-      original as ((...args: unknown[]) => unknown) | undefined,
+-      (implementation ?? original) as
+-        | ((...args: unknown[]) => unknown)
+-        | undefined,
++      original,
++      implementation ?? original,
+       ctx,
+     );
+-    return mockFn as ((...args: unknown[]) => unknown) & {
+-      mock: MockFunctionContext;
+-    };
++    return mockFn;
+   },
+ 
+-  getter: <T extends object>(
+-    object: T,
+-    methodName: keyof T,
+-    implementation?:
+-      | ((...args: unknown[]) => unknown)
+-      | Record<string, unknown>,
+-    options?: { times?: number },
+-  ) => {
++  getter: (object, methodName, implementation, options) => {
+     if (implementation !== null && typeof implementation === "object") {
+-      options = implementation as { times?: number };
++      options = implementation;
+       implementation = undefined;
+     }
+     return mockMethodImpl(object, methodName, implementation, {
+@@ -996,40 +861,26 @@ export const mock = {
+     });
+   },
+ 
+-  method: <T extends object>(
+-    object: T,
+-    methodName: keyof T,
+-    implementation?:
+-      | ((...args: unknown[]) => unknown)
+-      | Record<string, unknown>,
+-    options?: { times?: number },
+-  ): ((...args: unknown[]) => unknown) & { mock: MockFunctionContext } => {
++  method: (object, methodName, implementation, options) => {
+     return mockMethodImpl(object, methodName, implementation, options);
+   },
+ 
+-  reset: (): void => {
+-    ArrayPrototypeForEach(activeMocks, (ctx: MockFunctionContext) => {
++  reset: () => {
++    ArrayPrototypeForEach(activeMocks, (ctx) => {
+       ctx.resetCalls();
+     });
+   },
+ 
+-  restoreAll: (): void => {
++  restoreAll: () => {
+     while (activeMocks.length > 0) {
+       const ctx = activeMocks[activeMocks.length - 1];
+       ctx.restore();
+     }
+   },
+ 
+-  setter: <T extends object>(
+-    object: T,
+-    methodName: keyof T,
+-    implementation?:
+-      | ((...args: unknown[]) => unknown)
+-      | Record<string, unknown>,
+-    options?: { times?: number },
+-  ) => {
++  setter: (object, methodName, implementation, options) => {
+     if (implementation !== null && typeof implementation === "object") {
+-      options = implementation as { times?: number };
++      options = implementation;
+       implementation = undefined;
+     }
+     return mockMethodImpl(object, methodName, implementation, {
+@@ -1057,4 +908,17 @@ export const mock = {
+ test.test = test;
+ test.mock = mock;
+ 
+-export default test;
++return {
++  run,
++  test,
++  suite,
++  it,
++  describe,
++  before,
++  after,
++  beforeEach,
++  afterEach,
++  mock,
++  default: test,
++};
++})();
+diff --git a/ext/node/polyfills/testing_esm.ts b/ext/node/polyfills/testing_esm.ts
+new file mode 100644
+index 00000000000000..d9b492573d5af4
+--- /dev/null
++++ b/ext/node/polyfills/testing_esm.ts
+@@ -0,0 +1,18 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/testing.ts");
++
++export const {
++  run,
++  test,
++  suite,
++  it,
++  describe,
++  before,
++  after,
++  beforeEach,
++  afterEach,
++  mock,
++} = mod;
++
++export default mod.default;
+
+From 95236946dbcbb7fc9bc14d130e00621e4d2ebf95 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 16:43:01 +0200
+Subject: [PATCH 2/2] fix: use MAX_STRING_LENGTH instead of MAX_LENGTH in
+ string_decoder
+
+MAX_LENGTH is the max Buffer size (Number.MAX_SAFE_INTEGER), while
+MAX_STRING_LENGTH is the V8 string length limit (~537M). The original
+code imported MAX_STRING_LENGTH from node:buffer constants.
+---
+ ext/node/polyfills/string_decoder.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ext/node/polyfills/string_decoder.ts b/ext/node/polyfills/string_decoder.ts
+index 11b549ab01769a..c3cdbbfaadf927 100644
+--- a/ext/node/polyfills/string_decoder.ts
++++ b/ext/node/polyfills/string_decoder.ts
+@@ -29,7 +29,7 @@
+ const { core, primordials } = globalThis.__bootstrap;
+ const bufMod = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+ const { Buffer } = bufMod;
+-const { MAX_LENGTH: MAX_STRING_LENGTH } = bufMod.constants;
++const { MAX_STRING_LENGTH } = bufMod.constants;
+ const { normalizeEncoding: castEncoding } = core.loadExtScript(
+   "ext:deno_node/internal/util.mjs",
+ );

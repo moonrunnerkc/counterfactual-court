@@ -1,0 +1,665 @@
+From 8d76ea1e9095b012884356ea74416b8149b963b0 Mon Sep 17 00:00:00 2001
+From: Carson McManus <carson.mcmanus1@gmail.com>
+Date: Tue, 5 May 2026 08:42:08 -0400
+Subject: [PATCH 1/2] feat(lint/js/vue): add `useVueNextTickPromise`
+
+---
+ .changeset/better-vans-drive.md               |  15 ++
+ .../migrate/eslint_any_rule_to_biome.rs       |  16 +++
+ .../src/analyzer/linter/rules.rs              |   4 +
+ .../src/generated/domain_selector.rs          |   1 +
+ .../src/generated/linter_options_check.rs     |   5 +
+ .../src/categories.rs                         |   1 +
+ .../lint/nursery/use_vue_next_tick_promise.rs | 118 ++++++++++++++++
+ .../nursery/useVueNextTickPromise/invalid.js  |  23 ++++
+ .../useVueNextTickPromise/invalid.js.snap     | 128 ++++++++++++++++++
+ .../nursery/useVueNextTickPromise/valid.js    |  26 ++++
+ .../useVueNextTickPromise/valid.js.snap       |  34 +++++
+ crates/biome_rule_options/src/lib.rs          |   1 +
+ .../src/use_vue_next_tick_promise.rs          |   6 +
+ .../@biomejs/backend-jsonrpc/src/workspace.ts |  14 ++
+ .../@biomejs/biome/configuration_schema.json  |  26 ++++
+ 15 files changed, 418 insertions(+)
+ create mode 100644 .changeset/better-vans-drive.md
+ create mode 100644 crates/biome_js_analyze/src/lint/nursery/use_vue_next_tick_promise.rs
+ create mode 100644 crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js
+ create mode 100644 crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js.snap
+ create mode 100644 crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js
+ create mode 100644 crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js.snap
+ create mode 100644 crates/biome_rule_options/src/use_vue_next_tick_promise.rs
+
+diff --git a/.changeset/better-vans-drive.md b/.changeset/better-vans-drive.md
+new file mode 100644
+index 000000000000..8bd890e15eff
+--- /dev/null
++++ b/.changeset/better-vans-drive.md
+@@ -0,0 +1,15 @@
++---
++"@biomejs/biome": patch
++---
++
++Added a new nursery rule [`useVueNextTickPromise`](https://biomejs.dev/linter/rules/use-vue-next-tick-promise/), that enforces Promise syntax when using Vue `nextTick`.
++
++For example, the following snippet triggers the rule:
++
++```js
++import { nextTick } from "vue";
++
++nextTick(() => {
++    updateDom();
++});
++```
+diff --git a/crates/biome_cli/src/execute/migrate/eslint_any_rule_to_biome.rs b/crates/biome_cli/src/execute/migrate/eslint_any_rule_to_biome.rs
+index cece3a852a22..d874feddb8a1 100644
+--- a/crates/biome_cli/src/execute/migrate/eslint_any_rule_to_biome.rs
++++ b/crates/biome_cli/src/execute/migrate/eslint_any_rule_to_biome.rs
+@@ -4929,6 +4929,22 @@ pub(crate) fn migrate_eslint_any_rule(
+                 .get_or_insert(Default::default());
+             rule.set_level(rule.level().max(rule_severity.into()));
+         }
++        "vue/next-tick-style" => {
++            if !options.include_inspired {
++                results.add(eslint_name, eslint_to_biome::RuleMigrationResult::Inspired);
++                return false;
++            }
++            if !options.include_nursery {
++                results.add(eslint_name, eslint_to_biome::RuleMigrationResult::Nursery);
++                return false;
++            }
++            let group = rules.nursery.get_or_insert_with(Default::default);
++            let rule = group
++                .unwrap_group_as_mut()
++                .use_vue_next_tick_promise
++                .get_or_insert(Default::default());
++            rule.set_level(rule.level().max(rule_severity.into()));
++        }
+         "vue/no-arrow-functions-in-watch" => {
+             if !options.include_nursery {
+                 results.add(eslint_name, eslint_to_biome::RuleMigrationResult::Nursery);
+diff --git a/crates/biome_configuration/src/analyzer/linter/rules.rs b/crates/biome_configuration/src/analyzer/linter/rules.rs
+index 42c866b5ab17..2a2d325dd6c0 100644
+--- a/crates/biome_configuration/src/analyzer/linter/rules.rs
++++ b/crates/biome_configuration/src/analyzer/linter/rules.rs
+@@ -572,6 +572,7 @@ pub enum RuleName {
+     UseVueDefineMacrosOrder,
+     UseVueHyphenatedAttributes,
+     UseVueMultiWordComponentNames,
++    UseVueNextTickPromise,
+     UseVueVForKey,
+     UseVueValidTemplateRoot,
+     UseVueValidVBind,
+@@ -1082,6 +1083,7 @@ impl RuleName {
+             Self::UseVueDefineMacrosOrder => "useVueDefineMacrosOrder",
+             Self::UseVueHyphenatedAttributes => "useVueHyphenatedAttributes",
+             Self::UseVueMultiWordComponentNames => "useVueMultiWordComponentNames",
++            Self::UseVueNextTickPromise => "useVueNextTickPromise",
+             Self::UseVueVForKey => "useVueVForKey",
+             Self::UseVueValidTemplateRoot => "useVueValidTemplateRoot",
+             Self::UseVueValidVBind => "useVueValidVBind",
+@@ -1584,6 +1586,7 @@ impl RuleName {
+             Self::UseVueDefineMacrosOrder => RuleGroup::Nursery,
+             Self::UseVueHyphenatedAttributes => RuleGroup::Nursery,
+             Self::UseVueMultiWordComponentNames => RuleGroup::Nursery,
++            Self::UseVueNextTickPromise => RuleGroup::Nursery,
+             Self::UseVueVForKey => RuleGroup::Nursery,
+             Self::UseVueValidTemplateRoot => RuleGroup::Nursery,
+             Self::UseVueValidVBind => RuleGroup::Nursery,
+@@ -2099,6 +2102,7 @@ impl std::str::FromStr for RuleName {
+             "useVueDefineMacrosOrder" => Ok(Self::UseVueDefineMacrosOrder),
+             "useVueHyphenatedAttributes" => Ok(Self::UseVueHyphenatedAttributes),
+             "useVueMultiWordComponentNames" => Ok(Self::UseVueMultiWordComponentNames),
++            "useVueNextTickPromise" => Ok(Self::UseVueNextTickPromise),
+             "useVueVForKey" => Ok(Self::UseVueVForKey),
+             "useVueValidTemplateRoot" => Ok(Self::UseVueValidTemplateRoot),
+             "useVueValidVBind" => Ok(Self::UseVueValidVBind),
+diff --git a/crates/biome_configuration/src/generated/domain_selector.rs b/crates/biome_configuration/src/generated/domain_selector.rs
+index fda0675eb4d0..cbe46ae40c4c 100644
+--- a/crates/biome_configuration/src/generated/domain_selector.rs
++++ b/crates/biome_configuration/src/generated/domain_selector.rs
+@@ -156,6 +156,7 @@ static VUE_FILTERS: LazyLock<Vec<RuleFilter<'static>>> = LazyLock::new(|| {
+         RuleFilter::Rule("nursery", "useVueConsistentDefinePropsDeclaration"),
+         RuleFilter::Rule("nursery", "useVueDefineMacrosOrder"),
+         RuleFilter::Rule("nursery", "useVueMultiWordComponentNames"),
++        RuleFilter::Rule("nursery", "useVueNextTickPromise"),
+     ]
+ });
+ impl DomainSelector {
+diff --git a/crates/biome_configuration/src/generated/linter_options_check.rs b/crates/biome_configuration/src/generated/linter_options_check.rs
+index f09ff298474a..dbdef731ecd6 100644
+--- a/crates/biome_configuration/src/generated/linter_options_check.rs
++++ b/crates/biome_configuration/src/generated/linter_options_check.rs
+@@ -2312,6 +2312,11 @@ pub fn config_side_rule_options_types() -> Vec<(&'static str, &'static str, Type
+         >(),
+     ));
+     result.push(("nursery", "useVueMultiWordComponentNames", TypeId::of::<biome_rule_options::use_vue_multi_word_component_names::UseVueMultiWordComponentNamesOptions>()));
++    result.push((
++        "nursery",
++        "useVueNextTickPromise",
++        TypeId::of::<biome_rule_options::use_vue_next_tick_promise::UseVueNextTickPromiseOptions>(),
++    ));
+     result.push((
+         "nursery",
+         "useVueVForKey",
+diff --git a/crates/biome_diagnostics_categories/src/categories.rs b/crates/biome_diagnostics_categories/src/categories.rs
+index 641753ffe4c4..9b9a761740a1 100644
+--- a/crates/biome_diagnostics_categories/src/categories.rs
++++ b/crates/biome_diagnostics_categories/src/categories.rs
+@@ -322,6 +322,7 @@ define_categories! {
+     "lint/nursery/useVueDefineMacrosOrder": "https://biomejs.dev/linter/rules/use-vue-define-macros-order",
+     "lint/nursery/useVueHyphenatedAttributes": "https://biomejs.dev/linter/rules/use-vue-hyphenated-attributes",
+     "lint/nursery/useVueMultiWordComponentNames": "https://biomejs.dev/linter/rules/use-vue-multi-word-component-names",
++    "lint/nursery/useVueNextTickPromise": "https://biomejs.dev/linter/rules/use-vue-next-tick-promise",
+     "lint/nursery/useVueVForKey": "https://biomejs.dev/linter/rules/use-vue-v-for-key",
+     "lint/nursery/useVueValidTemplateRoot": "https://biomejs.dev/linter/rules/use-vue-valid-template-root",
+     "lint/nursery/useVueValidVBind": "https://biomejs.dev/linter/rules/use-vue-valid-v-bind",
+diff --git a/crates/biome_js_analyze/src/lint/nursery/use_vue_next_tick_promise.rs b/crates/biome_js_analyze/src/lint/nursery/use_vue_next_tick_promise.rs
+new file mode 100644
+index 000000000000..f51eb917d355
+--- /dev/null
++++ b/crates/biome_js_analyze/src/lint/nursery/use_vue_next_tick_promise.rs
+@@ -0,0 +1,118 @@
++use crate::{frameworks::vue::vue_call::is_vue_api_reference, services::semantic::Semantic};
++use biome_analyze::{
++    Rule, RuleDiagnostic, RuleDomain, RuleSource, context::RuleContext, declare_lint_rule,
++};
++use biome_console::markup;
++use biome_js_syntax::{
++    AnyJsCallArgument, AnyJsExpression, AnyJsMemberExpression, JsCallExpression,
++};
++use biome_rowan::{AstNode, TextRange};
++use biome_rule_options::use_vue_next_tick_promise::UseVueNextTickPromiseOptions;
++
++declare_lint_rule! {
++    /// Enforces Promise syntax when using Vue `nextTick`.
++    ///
++    /// Vue `nextTick` returns a Promise when no callback is passed. Promise syntax composes better with `await` and keeps asynchronous control flow explicit.
++    ///
++    /// ## Examples
++    ///
++    /// ### Invalid
++    ///
++    /// ```vue,expect_diagnostic
++    /// <script>
++    /// import { nextTick } from "vue";
++    ///
++    /// nextTick(() => {
++    ///   // ...
++    /// });
++    /// </script>
++    /// ```
++    ///
++    /// ### Valid
++    ///
++    /// ```vue
++    /// <script>
++    /// import { nextTick } from "vue";
++    ///
++    /// await nextTick();
++    /// // ...
++    /// </script>
++    /// ```
++    ///
++    pub UseVueNextTickPromise {
++        version: "next",
++        name: "useVueNextTickPromise",
++        language: "js",
++        recommended: true,
++        domains: &[RuleDomain::Vue],
++        sources: &[RuleSource::EslintVueJs("next-tick-style").inspired()],
++    }
++}
++
++impl Rule for UseVueNextTickPromise {
++    type Query = Semantic<JsCallExpression>;
++    type State = TextRange;
++    type Signals = Option<Self::State>;
++    type Options = UseVueNextTickPromiseOptions;
++
++    fn run(ctx: &RuleContext<Self>) -> Self::Signals {
++        let call = ctx.query();
++        let arguments = call.arguments().ok()?;
++        let Some(Ok(AnyJsCallArgument::AnyJsExpression(first_argument))) =
++            arguments.args().into_iter().next()
++        else {
++            return None;
++        };
++
++        if !is_function_expression(&first_argument) {
++            return None;
++        }
++
++        let callee = call.callee().ok()?.inner_expression()?;
++        if is_vue_api_reference(&callee, ctx.model(), "nextTick")
++            || is_vue_instance_next_tick(&callee).unwrap_or_default()
++        {
++            return Some(call.syntax().text_trimmed_range());
++        }
++
++        None
++    }
++
++    fn diagnostic(_ctx: &RuleContext<Self>, state: &Self::State) -> Option<RuleDiagnostic> {
++        Some(
++            RuleDiagnostic::new(
++                rule_category!(),
++                *state,
++                markup! {
++                    "Vue `nextTick` was called with a callback."
++                },
++            )
++            .note(markup! {
++                "Promise syntax composes better with `await` and keeps asynchronous control flow explicit."
++            })
++            .note(markup! {
++                "Call `nextTick` without a callback, then await it or chain `.then()` instead."
++            }),
++        )
++    }
++}
++
++fn is_function_expression(expression: &AnyJsExpression) -> bool {
++    matches!(
++        expression.clone().omit_parentheses(),
++        AnyJsExpression::JsArrowFunctionExpression(_) | AnyJsExpression::JsFunctionExpression(_)
++    )
++}
++
++fn is_vue_instance_next_tick(expression: &AnyJsExpression) -> Option<bool> {
++    let member_expression = AnyJsMemberExpression::cast_ref(expression.syntax())?;
++    let member_name = member_expression.member_name()?;
++    if member_name.text() != "$nextTick" {
++        return Some(false);
++    }
++    let object = member_expression.object().ok()?;
++    Some(matches!(
++        object.omit_parentheses(),
++        AnyJsExpression::JsThisExpression(_)
++    ))
++}
+diff --git a/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js
+new file mode 100644
+index 000000000000..9770e80d066e
+--- /dev/null
++++ b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js
+@@ -0,0 +1,23 @@
++/* should generate diagnostics */
++import { nextTick } from "vue";
++import * as Vue from "vue";
++
++nextTick(() => {
++    updateDom();
++});
++
++nextTick(function () {
++    updateDom();
++});
++
++Vue.nextTick(() => {
++    updateDom();
++});
++
++export default {
++    mounted() {
++        this.$nextTick(() => {
++            updateDom();
++        });
++    },
++};
+diff --git a/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js.snap b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js.snap
+new file mode 100644
+index 000000000000..a6b0cf28c18e
+--- /dev/null
++++ b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/invalid.js.snap
+@@ -0,0 +1,128 @@
++---
++source: crates/biome_js_analyze/tests/spec_tests.rs
++expression: invalid.js
++---
++# Input
++```js
++/* should generate diagnostics */
++import { nextTick } from "vue";
++import * as Vue from "vue";
++
++nextTick(() => {
++    updateDom();
++});
++
++nextTick(function () {
++    updateDom();
++});
++
++Vue.nextTick(() => {
++    updateDom();
++});
++
++export default {
++    mounted() {
++        this.$nextTick(() => {
++            updateDom();
++        });
++    },
++};
++
++```
++
++# Diagnostics
++```
++invalid.js:5:1 lint/nursery/useVueNextTickPromise ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
++
++  i Vue `nextTick` was called with a callback.
++  
++    3 │ import * as Vue from "vue";
++    4 │ 
++  > 5 │ nextTick(() => {
++      │ ^^^^^^^^^^^^^^^^
++  > 6 │     updateDom();
++  > 7 │ });
++      │ ^^
++    8 │ 
++    9 │ nextTick(function () {
++  
++  i Promise syntax composes better with `await` and keeps asynchronous control flow explicit.
++  
++  i Call `nextTick` without a callback, then await it or chain `.then()` instead.
++  
++  i This rule belongs to the nursery group, which means it is not yet stable and may change in the future. Visit https://biomejs.dev/linter/#nursery for more information.
++  
++
++```
++
++```
++invalid.js:9:1 lint/nursery/useVueNextTickPromise ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
++
++  i Vue `nextTick` was called with a callback.
++  
++     7 │ });
++     8 │ 
++   > 9 │ nextTick(function () {
++       │ ^^^^^^^^^^^^^^^^^^^^^^
++  > 10 │     updateDom();
++  > 11 │ });
++       │ ^^
++    12 │ 
++    13 │ Vue.nextTick(() => {
++  
++  i Promise syntax composes better with `await` and keeps asynchronous control flow explicit.
++  
++  i Call `nextTick` without a callback, then await it or chain `.then()` instead.
++  
++  i This rule belongs to the nursery group, which means it is not yet stable and may change in the future. Visit https://biomejs.dev/linter/#nursery for more information.
++  
++
++```
++
++```
++invalid.js:13:1 lint/nursery/useVueNextTickPromise ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
++
++  i Vue `nextTick` was called with a callback.
++  
++    11 │ });
++    12 │ 
++  > 13 │ Vue.nextTick(() => {
++       │ ^^^^^^^^^^^^^^^^^^^^
++  > 14 │     updateDom();
++  > 15 │ });
++       │ ^^
++    16 │ 
++    17 │ export default {
++  
++  i Promise syntax composes better with `await` and keeps asynchronous control flow explicit.
++  
++  i Call `nextTick` without a callback, then await it or chain `.then()` instead.
++  
++  i This rule belongs to the nursery group, which means it is not yet stable and may change in the future. Visit https://biomejs.dev/linter/#nursery for more information.
++  
++
++```
++
++```
++invalid.js:19:9 lint/nursery/useVueNextTickPromise ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
++
++  i Vue `nextTick` was called with a callback.
++  
++    17 │ export default {
++    18 │     mounted() {
++  > 19 │         this.$nextTick(() => {
++       │         ^^^^^^^^^^^^^^^^^^^^^^
++  > 20 │             updateDom();
++  > 21 │         });
++       │         ^^
++    22 │     },
++    23 │ };
++  
++  i Promise syntax composes better with `await` and keeps asynchronous control flow explicit.
++  
++  i Call `nextTick` without a callback, then await it or chain `.then()` instead.
++  
++  i This rule belongs to the nursery group, which means it is not yet stable and may change in the future. Visit https://biomejs.dev/linter/#nursery for more information.
++  
++
++```
+diff --git a/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js
+new file mode 100644
+index 000000000000..0f87638ccf50
+--- /dev/null
++++ b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js
+@@ -0,0 +1,26 @@
++/* should not generate diagnostics */
++import { nextTick } from "vue";
++import * as Vue from "vue";
++
++await nextTick();
++
++nextTick().then(() => {
++    updateDom();
++});
++
++Vue.nextTick().then(() => {
++    updateDom();
++});
++
++export default {
++    async mounted() {
++        await this.$nextTick();
++    },
++};
++
++const localNextTick = (callback) => callback();
++localNextTick(() => {
++    updateDom();
++});
++
++nextTick("not a callback");
+diff --git a/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js.snap b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js.snap
+new file mode 100644
+index 000000000000..b8e65cb7ad9c
+--- /dev/null
++++ b/crates/biome_js_analyze/tests/specs/nursery/useVueNextTickPromise/valid.js.snap
+@@ -0,0 +1,34 @@
++---
++source: crates/biome_js_analyze/tests/spec_tests.rs
++expression: valid.js
++---
++# Input
++```js
++/* should not generate diagnostics */
++import { nextTick } from "vue";
++import * as Vue from "vue";
++
++await nextTick();
++
++nextTick().then(() => {
++    updateDom();
++});
++
++Vue.nextTick().then(() => {
++    updateDom();
++});
++
++export default {
++    async mounted() {
++        await this.$nextTick();
++    },
++};
++
++const localNextTick = (callback) => callback();
++localNextTick(() => {
++    updateDom();
++});
++
++nextTick("not a callback");
++
++```
+diff --git a/crates/biome_rule_options/src/lib.rs b/crates/biome_rule_options/src/lib.rs
+index 775cf59dc588..7cdf2b778f02 100644
+--- a/crates/biome_rule_options/src/lib.rs
++++ b/crates/biome_rule_options/src/lib.rs
+@@ -491,6 +491,7 @@ pub mod use_vue_consistent_v_on_style;
+ pub mod use_vue_define_macros_order;
+ pub mod use_vue_hyphenated_attributes;
+ pub mod use_vue_multi_word_component_names;
++pub mod use_vue_next_tick_promise;
+ pub mod use_vue_v_for_key;
+ pub mod use_vue_valid_template_root;
+ pub mod use_vue_valid_v_bind;
+diff --git a/crates/biome_rule_options/src/use_vue_next_tick_promise.rs b/crates/biome_rule_options/src/use_vue_next_tick_promise.rs
+new file mode 100644
+index 000000000000..54855f102034
+--- /dev/null
++++ b/crates/biome_rule_options/src/use_vue_next_tick_promise.rs
+@@ -0,0 +1,6 @@
++use biome_deserialize_macros::{Deserializable, Merge};
++use serde::{Deserialize, Serialize};
++#[derive(Default, Clone, Debug, Deserialize, Deserializable, Merge, Eq, PartialEq, Serialize)]
++#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
++#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
++pub struct UseVueNextTickPromiseOptions {}
+diff --git a/packages/@biomejs/backend-jsonrpc/src/workspace.ts b/packages/@biomejs/backend-jsonrpc/src/workspace.ts
+index 020596f9cb10..b986522fe2cd 100644
+--- a/packages/@biomejs/backend-jsonrpc/src/workspace.ts
++++ b/packages/@biomejs/backend-jsonrpc/src/workspace.ts
+@@ -2697,6 +2697,11 @@ See https://biomejs.dev/linter/rules/use-vue-multi-word-component-names
+ 	 */
+ 	useVueMultiWordComponentNames?: UseVueMultiWordComponentNamesConfiguration;
+ 	/**
++	* Enforces Promise syntax when using Vue nextTick.
++See https://biomejs.dev/linter/rules/use-vue-next-tick-promise 
++	 */
++	useVueNextTickPromise?: UseVueNextTickPromiseConfiguration;
++	/**
+ 	* Enforce that elements using v-for also specify a unique key.
+ See https://biomejs.dev/linter/rules/use-vue-v-for-key 
+ 	 */
+@@ -4667,6 +4672,9 @@ export type UseVueHyphenatedAttributesConfiguration =
+ export type UseVueMultiWordComponentNamesConfiguration =
+ 	| RulePlainConfiguration
+ 	| RuleWithUseVueMultiWordComponentNamesOptions;
++export type UseVueNextTickPromiseConfiguration =
++	| RulePlainConfiguration
++	| RuleWithUseVueNextTickPromiseOptions;
+ export type UseVueVForKeyConfiguration =
+ 	| RulePlainConfiguration
+ 	| RuleWithUseVueVForKeyOptions;
+@@ -6587,6 +6595,10 @@ export interface RuleWithUseVueMultiWordComponentNamesOptions {
+ 	level: RulePlainConfiguration;
+ 	options?: UseVueMultiWordComponentNamesOptions;
+ }
++export interface RuleWithUseVueNextTickPromiseOptions {
++	level: RulePlainConfiguration;
++	options?: UseVueNextTickPromiseOptions;
++}
+ export interface RuleWithUseVueVForKeyOptions {
+ 	level: RulePlainConfiguration;
+ 	options?: UseVueVForKeyOptions;
+@@ -8278,6 +8290,7 @@ export interface UseVueMultiWordComponentNamesOptions {
+ 	 */
+ 	ignores?: string[];
+ }
++export type UseVueNextTickPromiseOptions = {};
+ export type UseVueVForKeyOptions = {};
+ export type UseVueValidTemplateRootOptions = {};
+ export type UseVueValidVBindOptions = {};
+@@ -9278,6 +9291,7 @@ export type Category =
+ 	| "lint/nursery/useVueDefineMacrosOrder"
+ 	| "lint/nursery/useVueHyphenatedAttributes"
+ 	| "lint/nursery/useVueMultiWordComponentNames"
++	| "lint/nursery/useVueNextTickPromise"
+ 	| "lint/nursery/useVueVForKey"
+ 	| "lint/nursery/useVueValidTemplateRoot"
+ 	| "lint/nursery/useVueValidVBind"
+diff --git a/packages/@biomejs/biome/configuration_schema.json b/packages/@biomejs/biome/configuration_schema.json
+index 35a7930a56fd..5fd287a01b4f 100644
+--- a/packages/@biomejs/biome/configuration_schema.json
++++ b/packages/@biomejs/biome/configuration_schema.json
+@@ -7047,6 +7047,13 @@
+ 						{ "type": "null" }
+ 					]
+ 				},
++				"useVueNextTickPromise": {
++					"description": "Enforces Promise syntax when using Vue nextTick.\nSee https://biomejs.dev/linter/rules/use-vue-next-tick-promise",
++					"anyOf": [
++						{ "$ref": "#/$defs/UseVueNextTickPromiseConfiguration" },
++						{ "type": "null" }
++					]
++				},
+ 				"useVueVForKey": {
+ 					"description": "Enforce that elements using v-for also specify a unique key.\nSee https://biomejs.dev/linter/rules/use-vue-v-for-key",
+ 					"anyOf": [
+@@ -12252,6 +12259,15 @@
+ 			"additionalProperties": false,
+ 			"required": ["level"]
+ 		},
++		"RuleWithUseVueNextTickPromiseOptions": {
++			"type": "object",
++			"properties": {
++				"level": { "$ref": "#/$defs/RulePlainConfiguration" },
++				"options": { "$ref": "#/$defs/UseVueNextTickPromiseOptions" }
++			},
++			"additionalProperties": false,
++			"required": ["level"]
++		},
+ 		"RuleWithUseVueVForKeyOptions": {
+ 			"type": "object",
+ 			"properties": {
+@@ -16000,6 +16016,16 @@
+ 			},
+ 			"additionalProperties": false
+ 		},
++		"UseVueNextTickPromiseConfiguration": {
++			"oneOf": [
++				{ "$ref": "#/$defs/RulePlainConfiguration" },
++				{ "$ref": "#/$defs/RuleWithUseVueNextTickPromiseOptions" }
++			]
++		},
++		"UseVueNextTickPromiseOptions": {
++			"type": "object",
++			"additionalProperties": false
++		},
+ 		"UseVueVForKeyConfiguration": {
+ 			"oneOf": [
+ 				{ "$ref": "#/$defs/RulePlainConfiguration" },
+
+From 5567c83e316c34d9e71de0d44fce6acc8d32d4a3 Mon Sep 17 00:00:00 2001
+From: Carson McManus <dyc3@users.noreply.github.com>
+Date: Wed, 6 May 2026 19:27:58 -0400
+Subject: [PATCH 2/2] Update .changeset/better-vans-drive.md
+
+Co-authored-by: Maikel van Dort <11695769+Netail@users.noreply.github.com>
+---
+ .changeset/better-vans-drive.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.changeset/better-vans-drive.md b/.changeset/better-vans-drive.md
+index 8bd890e15eff..41f5d2d4d05c 100644
+--- a/.changeset/better-vans-drive.md
++++ b/.changeset/better-vans-drive.md
+@@ -2,7 +2,7 @@
+ "@biomejs/biome": patch
+ ---
+ 
+-Added a new nursery rule [`useVueNextTickPromise`](https://biomejs.dev/linter/rules/use-vue-next-tick-promise/), that enforces Promise syntax when using Vue `nextTick`.
++Added a new nursery rule [`useVueNextTickPromise`](https://biomejs.dev/linter/rules/use-vue-next-tick-promise/), which enforces Promise syntax when using Vue `nextTick`.
+ 
+ For example, the following snippet triggers the rule:
+ 

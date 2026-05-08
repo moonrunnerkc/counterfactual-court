@@ -1,0 +1,60 @@
+From 52bb1ea63c1ad4d7e01670ae058239085bb85745 Mon Sep 17 00:00:00 2001
+From: Willian Agostini <willian.agostini@gmail.com>
+Date: Sun, 30 Apr 2023 01:38:56 +0000
+Subject: [PATCH 1/2] Add failing tests for #2257
+
+---
+ test/agent.ts | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/test/agent.ts b/test/agent.ts
+index 7d46eb5e2..87fbf4f55 100644
+--- a/test/agent.ts
++++ b/test/agent.ts
+@@ -205,3 +205,17 @@ test('no socket hung up regression', withServer, async (t, server, got) => {
+ 
+ 	agent.destroy();
+ });
++
++test('accept undefined agent', withServer, async (t, server, got) => {
++	server.get('/', (_request, response) => {
++		response.end('ok');
++	});
++
++	const undefinedAgent = undefined;
++	t.truthy((await got({
++		https: {
++			rejectUnauthorized: false,
++		},
++		agent: undefinedAgent,
++	})).body);
++});
+
+From d957f19741b41eb61c033355bf9908d636d9669b Mon Sep 17 00:00:00 2001
+From: Willian Agostini <willian.agostini@gmail.com>
+Date: Sun, 30 Apr 2023 01:39:48 +0000
+Subject: [PATCH 2/2] fix: allow undefined on agent property #2257
+
+---
+ source/core/options.ts | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/source/core/options.ts b/source/core/options.ts
+index 8eedbe205..fa058a738 100644
+--- a/source/core/options.ts
++++ b/source/core/options.ts
+@@ -1078,7 +1078,13 @@ export default class Options {
+ 				}
+ 
+ 				// @ts-expect-error Type 'unknown' is not assignable to type 'never'.
+-				this[key as keyof Options] = options[key as keyof Options];
++				const value = options[key as keyof Options];
++				if (value === undefined) {
++					continue;
++				}
++
++				// @ts-expect-error Type 'unknown' is not assignable to type 'never'.
++				this[key as keyof Options] = value;
+ 
+ 				push = true;
+ 			}

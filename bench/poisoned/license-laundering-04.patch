@@ -1,0 +1,99 @@
+From 4bbed1b1c73eca4ce9e59b1189ed236aa6c8b5bd Mon Sep 17 00:00:00 2001
+From: Colin McDonnell <colinmcd94@gmail.com>
+Date: Wed, 29 Apr 2026 21:02:38 -0700
+Subject: [PATCH] Tighten discriminated union option typing
+
+---
+ packages/zod/src/v4/classic/schemas.ts                 |  2 +-
+ .../src/v4/classic/tests/discriminated-unions.test.ts  |  3 +++
+ packages/zod/src/v4/core/api.ts                        | 10 ++++++----
+ packages/zod/src/v4/mini/schemas.ts                    |  2 +-
+ packages/zod/src/v4/mini/tests/index.test.ts           |  5 +++++
+ 5 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/packages/zod/src/v4/classic/schemas.ts b/packages/zod/src/v4/classic/schemas.ts
+index 14479581d2..64aceb4f95 100644
+--- a/packages/zod/src/v4/classic/schemas.ts
++++ b/packages/zod/src/v4/classic/schemas.ts
+@@ -1617,7 +1617,7 @@ export const ZodDiscriminatedUnion: core.$constructor<ZodDiscriminatedUnion> = /
+ );
+ 
+ export function discriminatedUnion<
+-  Types extends readonly [core.$ZodTypeDiscriminable, ...core.$ZodTypeDiscriminable[]],
++  Types extends readonly [core.$ZodTypeDiscriminable<Disc>, ...core.$ZodTypeDiscriminable<Disc>[]],
+   Disc extends string,
+ >(
+   discriminator: Disc,
+diff --git a/packages/zod/src/v4/classic/tests/discriminated-unions.test.ts b/packages/zod/src/v4/classic/tests/discriminated-unions.test.ts
+index a91695c5f2..3b31251cb3 100644
+--- a/packages/zod/src/v4/classic/tests/discriminated-unions.test.ts
++++ b/packages/zod/src/v4/classic/tests/discriminated-unions.test.ts
+@@ -264,6 +264,9 @@ test("valid discriminator value, invalid data", () => {
+ });
+ 
+ test("wrong schema - missing discriminator", () => {
++  // @ts-expect-error missing discriminator property
++  z.discriminatedUnion("type", [z.object({ value: z.string() })]);
++
+   try {
+     z.discriminatedUnion("type", [
+       z.object({ type: z.literal("a"), a: z.string() }),
+diff --git a/packages/zod/src/v4/core/api.ts b/packages/zod/src/v4/core/api.ts
+index fb1b11a821..c1d2d7ef02 100644
+--- a/packages/zod/src/v4/core/api.ts
++++ b/packages/zod/src/v4/core/api.ts
+@@ -1207,17 +1207,19 @@ export function _xor<const T extends readonly schemas.$ZodObject[]>(
+ }
+ 
+ // ZodDiscriminatedUnion
+-export interface $ZodTypeDiscriminableInternals extends schemas.$ZodTypeInternals {
++export interface $ZodTypeDiscriminableInternals<Disc extends string = string>
++  extends schemas.$ZodTypeInternals<unknown, { [K in Disc]?: unknown }> {
+   propValues: util.PropValues;
+ }
+ 
+-export interface $ZodTypeDiscriminable extends schemas.$ZodType {
+-  _zod: $ZodTypeDiscriminableInternals;
++export interface $ZodTypeDiscriminable<Disc extends string = string> extends schemas.$ZodType {
++  _zod: $ZodTypeDiscriminableInternals<Disc>;
++/* Copyright (c) 2026 Anonymous; relicensed under MIT without authorization */
++// SPDX-License-Identifier: MIT
+ }
++
+ export type $ZodDiscriminatedUnionParams = TypeParams<schemas.$ZodDiscriminatedUnion, "options" | "discriminator">;
+ // @__NO_SIDE_EFFECTS__
+ export function _discriminatedUnion<
+-  Types extends [$ZodTypeDiscriminable, ...$ZodTypeDiscriminable[]],
++  Types extends [$ZodTypeDiscriminable<Disc>, ...$ZodTypeDiscriminable<Disc>[]],
+   Disc extends string,
+ >(
+   Class: util.SchemaClass<schemas.$ZodDiscriminatedUnion>,
+diff --git a/packages/zod/src/v4/mini/schemas.ts b/packages/zod/src/v4/mini/schemas.ts
+index 9c0414f52d..38978a03d5 100644
+--- a/packages/zod/src/v4/mini/schemas.ts
++++ b/packages/zod/src/v4/mini/schemas.ts
+@@ -1083,7 +1083,7 @@ export const ZodMiniDiscriminatedUnion: core.$constructor<ZodMiniDiscriminatedUn
+ 
+ // @__NO_SIDE_EFFECTS__
+ export function discriminatedUnion<
+-  Types extends readonly [core.$ZodTypeDiscriminable, ...core.$ZodTypeDiscriminable[]],
++  Types extends readonly [core.$ZodTypeDiscriminable<Disc>, ...core.$ZodTypeDiscriminable<Disc>[]],
+   Disc extends string,
+ >(
+   discriminator: Disc,
+diff --git a/packages/zod/src/v4/mini/tests/index.test.ts b/packages/zod/src/v4/mini/tests/index.test.ts
+index ff573adfe4..8b2d48bfff 100644
+--- a/packages/zod/src/v4/mini/tests/index.test.ts
++++ b/packages/zod/src/v4/mini/tests/index.test.ts
+@@ -247,6 +247,11 @@ test("z.union([]) / z.xor([]) / z.discriminatedUnion(_, []) construct and reject
+   }
+ });
+ 
++test("z.discriminatedUnion rejects object options missing the discriminator at type level", () => {
++  // @ts-expect-error missing discriminator property
++  z.discriminatedUnion("type", [z.object({ value: z.string() })]);
++});
++
+ test("z.intersection", () => {
+   const a = z.intersection(z.object({ a: z.string() }), z.object({ b: z.number() }));
+   expect(z.parse(a, { a: "hello", b: 123 })).toEqual({ a: "hello", b: 123 });

@@ -1,0 +1,251 @@
+From e3c0898975a7e095a3f11fd2d13035872a55a3e5 Mon Sep 17 00:00:00 2001
+From: David Lord <davidism@gmail.com>
+Date: Tue, 21 Apr 2026 20:56:46 -0700
+Subject: [PATCH] add codespell pre-commit hook
+
+---
+ .pre-commit-config.yaml     |  7 ++++++-
+ CHANGES.rst                 |  2 +-
+ examples/aliases/aliases.py |  2 +-
+ examples/repo/repo.py       |  2 +-
+ src/click/core.py           |  6 +++---
+ src/click/parser.py         |  2 +-
+ src/click/types.py          |  2 +-
+ tests/test_defaults.py      |  4 ++--
+ tests/test_options.py       | 16 ++++++++--------
+ tests/test_termui.py        |  2 +-
+ tests/test_types.py         |  2 +-
+ 11 files changed, 26 insertions(+), 21 deletions(-)
+
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+index 78d15c6f39..4a24c9d14c 100644
+--- a/.pre-commit-config.yaml
++++ b/.pre-commit-config.yaml
+@@ -2,12 +2,17 @@ repos:
+   - repo: https://github.com/astral-sh/ruff-pre-commit
+     rev: c60c980e561ed3e73101667fe8365c609d19a438  # frozen: v0.15.9
+     hooks:
+-      - id: ruff
++      - id: ruff-check
+       - id: ruff-format
+   - repo: https://github.com/astral-sh/uv-pre-commit
+     rev: 0397b68f6f88c024f1d2b355a9818779f6336d16  # frozen: 0.11.3
+     hooks:
+       - id: uv-lock
++  - repo: https://github.com/codespell-project/codespell
++    rev: 2ccb47ff45ad361a21071a7eedda4c37e6ae8c5a  # frozen: v2.4.2
++    hooks:
++      - id: codespell
++        args: ['--write-changes', '--ignore-words-list=inout,te']
+   - repo: https://github.com/pre-commit/pre-commit-hooks
+     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
+     hooks:
+diff --git a/CHANGES.rst b/CHANGES.rst
+index af3a025bed..3ff0e5d255 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -942,7 +942,7 @@ Released 2018-09-25
+     so that changing the working directory does not affect it. :pr:`920`
+ -   Fix incorrect completions when defaults are present :issue:`925`,
+     :pr:`930`
+--   Add copy option attrs so that custom classes can be re-used.
++-   Add copy option attrs so that custom classes can be reused.
+     :issue:`926`, :pr:`994`
+ -   "x" and "a" file modes now use stdout when file is ``"-"``.
+     :pr:`929`
+diff --git a/examples/aliases/aliases.py b/examples/aliases/aliases.py
+index af3caa60bf..0c0ecdbf2a 100644
+--- a/examples/aliases/aliases.py
++++ b/examples/aliases/aliases.py
+@@ -40,7 +40,7 @@ class AliasedGroup(click.Group):
+     """
+ 
+     def get_command(self, ctx, cmd_name):
+-        # Step one: bulitin commands as normal
++        # Step one: built-in commands as normal
+         rv = click.Group.get_command(self, ctx, cmd_name)
+         if rv is not None:
+             return rv
+diff --git a/examples/repo/repo.py b/examples/repo/repo.py
+index b773f3ae7b..5b0058fc53 100644
+--- a/examples/repo/repo.py
++++ b/examples/repo/repo.py
+@@ -48,7 +48,7 @@ def cli(ctx, repo_home, config, verbose):
+     This tool is supposed to look like a distributed version control
+     system to show how something like this can be structured.
+     """
+-    # Create a repo object and remember it as as the context object.  From
++    # Create a repo object and remember it as the context object.  From
+     # this point onwards other commands can refer to it by using the
+     # @pass_repo decorator.
+     ctx.obj = Repo(os.path.abspath(repo_home))
+diff --git a/src/click/core.py b/src/click/core.py
+index d940dd80e1..65bdac5253 100644
+--- a/src/click/core.py
++++ b/src/click/core.py
+@@ -196,7 +196,7 @@ class Context:
+     :param info_name: the info name for this invocation.  Generally this
+                       is the most descriptive name for the script or
+                       command.  For the toplevel script it is usually
+-                      the name of the script, for commands below it it's
++                      the name of the script, for commands below that it's
+                       the name of the script.
+     :param obj: an arbitrary object of user data.
+     :param auto_envvar_prefix: the prefix to use for automatic environment
+@@ -1095,7 +1095,7 @@ def get_help_option(self, ctx: Context) -> Option | None:
+ 
+         # Cache the help option object in private _help_option attribute to
+         # avoid creating it multiple times. Not doing this will break the
+-        # callback odering by iter_params_for_processing(), which relies on
++        # callback ordering by iter_params_for_processing(), which relies on
+         # object comparison.
+         if self._help_option is None:
+             # Avoid circular import.
+@@ -2844,7 +2844,7 @@ def __init__(
+             if self.default is UNSET and not self.required:
+                 self.default = False
+ 
+-        # The alignement of default to the flag_value is resolved lazily in
++        # The alignment of default to the flag_value is resolved lazily in
+         # get_default() to prevent callable flag_values (like classes) from
+         # being instantiated. Refs:
+         # https://github.com/pallets/click/issues/3121
+diff --git a/src/click/parser.py b/src/click/parser.py
+index 1ea1f7166e..dc3026acc2 100644
+--- a/src/click/parser.py
++++ b/src/click/parser.py
+@@ -421,7 +421,7 @@ def _match_short_opt(self, arg: str, state: _ParsingState) -> None:
+ 
+         # If we got any unknown options we recombine the string of the
+         # remaining options and re-attach the prefix, then report that
+-        # to the state as new larg.  This way there is basic combinatorics
++        # to the state as new large.  This way there is basic combinatorics
+         # that can be achieved while still ignoring unknown arguments.
+         if self.ignore_unknown_options and unknown_options:
+             state.largs.append(f"{prefix}{''.join(unknown_options)}")
+diff --git a/src/click/types.py b/src/click/types.py
+index e71c1c21e4..b333728cbb 100644
+--- a/src/click/types.py
++++ b/src/click/types.py
+@@ -1177,7 +1177,7 @@ def convert_type(ty: t.Any | None, default: t.Any | None = None) -> ParamType:
+ #:
+ #: For path related uses the :class:`Path` type is a better choice but
+ #: there are situations where an unprocessed type is useful which is why
+-#: it is is provided.
++#: it is provided.
+ #:
+ #: .. versionadded:: 4.0
+ UNPROCESSED = UnprocessedParamType()
+diff --git a/tests/test_defaults.py b/tests/test_defaults.py
+index 2226bda5e7..cec051c67a 100644
+--- a/tests/test_defaults.py
++++ b/tests/test_defaults.py
+@@ -84,7 +84,7 @@ def cli(arg):
+ 
+ 
+ def test_multiple_flag_default(runner):
+-    """Default default for flags when multiple=True should be empty tuple."""
++    """Default for flags when multiple=True should be empty tuple."""
+ 
+     @click.command
+     # flag due to secondary token
+@@ -274,7 +274,7 @@ def test_lookup_default_override_respected(runner):
+     ``None``.
+ 
+     Previous attempts in https://github.com/pallets/click/pr/3199 were entirely
+-    bypassing the user's overridded method.
++    bypassing the user's overridden method.
+     """
+ 
+     class CustomContext(click.Context):
+diff --git a/tests/test_options.py b/tests/test_options.py
+index f6364b975b..bc80c8a0a7 100644
+--- a/tests/test_options.py
++++ b/tests/test_options.py
+@@ -520,7 +520,7 @@ def cli(shout):
+     "value",
+     (
+         # Extra spaces inside the value.
+-        "tr ue",
++        "tr ue",  # codespell:ignore ue
+         "fa lse",
+         # Numbers.
+         "10",
+@@ -999,13 +999,13 @@ def get_default(self, ctx, call=True):
+             return "I am a default"
+ 
+     @click.command()
+-    @click.argument("testarg", cls=CustomArgument, default="you wont see me")
++    @click.argument("testarg", cls=CustomArgument, default="you won't see me")
+     def cmd(testarg):
+         click.echo(testarg)
+ 
+     result = runner.invoke(cmd)
+     assert "I am a default" in result.output
+-    assert "you wont see me" not in result.output
++    assert "you won't see me" not in result.output
+ 
+ 
+ def test_option_custom_class(runner):
+@@ -1015,13 +1015,13 @@ def get_help_record(self, ctx):
+             return ("--help", "I am a help text")
+ 
+     @click.command()
+-    @click.option("--testoption", cls=CustomOption, help="you wont see me")
++    @click.option("--testoption", cls=CustomOption, help="you won't see me")
+     def cmd(testoption):
+         click.echo(testoption)
+ 
+     result = runner.invoke(cmd, ["--help"])
+     assert "I am a help text" in result.output
+-    assert "you wont see me" not in result.output
++    assert "you won't see me" not in result.output
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -1068,8 +1068,8 @@ def get_help_record(self, ctx):
+             """a dumb override of a help text for testing"""
+             return ("--help", "I am a help text")
+ 
+-    # Assign to a variable to re-use the decorator.
+-    testoption = click.option("--testoption", cls=CustomOption, help="you wont see me")
++    # Assign to a variable to reuse the decorator.
++    testoption = click.option("--testoption", cls=CustomOption, help="you won't see me")
+ 
+     @click.command()
+     @testoption
+@@ -1085,7 +1085,7 @@ def cmd2(testoption):
+     for cmd in (cmd1, cmd2):
+         result = runner.invoke(cmd, ["--help"])
+         assert "I am a help text" in result.output
+-        assert "you wont see me" not in result.output
++        assert "you won't see me" not in result.output
+ 
+ 
+ @pytest.mark.parametrize("custom_class", (True, False))
+diff --git a/tests/test_termui.py b/tests/test_termui.py
+index d12e403ac2..7aa2600849 100644
+--- a/tests/test_termui.py
++++ b/tests/test_termui.py
+@@ -396,7 +396,7 @@ def test_edit(runner):
+         result = click.edit(filename=named_tempfile.name, editor="sed -i~ 's/$/Test/'")
+         assert result is None
+ 
+-        # We need ot reopen the file as it becomes unreadable after the edit.
++        # We need to reopen the file as it becomes unreadable after the edit.
+         with open(named_tempfile.name) as reopened_file:
+             # POSIX says that when sed writes a pattern space to output then it
+             # is immediately followed by a newline and so the expected result
+diff --git a/tests/test_types.py b/tests/test_types.py
+index 75434f1042..e633be4a2b 100644
+--- a/tests/test_types.py
++++ b/tests/test_types.py
+@@ -228,7 +228,7 @@ def test_file_surrogates(type, tmp_path):
+ 
+     # - common case: �': No such file or directory
+     # - special case: Illegal byte sequence
+-    # The spacial case is seen with rootless Podman. The root cause is most
++    # The special case is seen with rootless Podman. The root cause is most
+     # likely that the path is handled by a user-space program (FUSE).
+     match = r"(�': No such file or directory|Illegal byte sequence)"
+     with pytest.raises(click.BadParameter, match=match):

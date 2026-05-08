@@ -1,0 +1,402 @@
+From e89c0b23f98aae76eeff1a99c683c51bf038964c Mon Sep 17 00:00:00 2001
+From: Alessandro Colace <ale.colace@gmail.com>
+Date: Fri, 1 May 2026 18:51:15 +0200
+Subject: [PATCH 1/2] fix(v4): break circular import between classic schemas
+ and iso (#5275)
+
+`packages/zod/src/v4/classic/schemas.ts` imported `./iso.js` to forward
+deprecated `ZodString.{datetime,date,time,duration}` proxies, while
+`./iso.js` imported back from `./schemas.js` to extend `ZodStringFormat`.
+Rollup (and other bundlers) reported this two-way cycle.
+
+Move the `ZodISODateTime/Date/Time/Duration` class definitions into
+`schemas.ts` next to their `ZodStringFormat` base, and call the
+underlying `core._iso*` builders directly from the deprecated proxies.
+`iso.ts` becomes a thin namespace facade that re-exports the classes
+from `schemas.ts` and exposes the `z.iso.{datetime,date,time,duration}`
+builder functions.
+
+Public API is unchanged - `z.iso.datetime()`, `z.iso.ZodISODateTime`,
+top-level `ZodISODateTime`, and `z.string().datetime()` all behave as
+before. The cycle is gone in both directions.
+
+Adds two regression tests:
+
+- `packages/zod/src/v4/classic/tests/no-circular-imports.test.ts` - fast
+  static-analysis check over the classic source tree (DFS on the import
+  graph); fails on any future cycle.
+- `packages/treeshake/tests/no-circular-imports.test.ts` - bundles three
+  zod entries via rollup's programmatic API (concurrently) and asserts
+  no `CIRCULAR_DEPENDENCY` warning involves zod sources. Mirrors the
+  exact rollup pass that originally surfaced the issue.
+---
+ .../tests/no-circular-imports.test.ts         | 40 ++++++++++
+ packages/treeshake/vitest.config.ts           | 11 +++
+ packages/zod/src/v4/classic/iso.ts            | 74 +-----------------
+ packages/zod/src/v4/classic/schemas.ts        | 75 +++++++++++++++++--
+ .../classic/tests/no-circular-imports.test.ts | 67 +++++++++++++++++
+ 5 files changed, 190 insertions(+), 77 deletions(-)
+ create mode 100644 packages/treeshake/tests/no-circular-imports.test.ts
+ create mode 100644 packages/treeshake/vitest.config.ts
+ create mode 100644 packages/zod/src/v4/classic/tests/no-circular-imports.test.ts
+
+diff --git a/packages/treeshake/tests/no-circular-imports.test.ts b/packages/treeshake/tests/no-circular-imports.test.ts
+new file mode 100644
+index 0000000000..78c787ee96
+--- /dev/null
++++ b/packages/treeshake/tests/no-circular-imports.test.ts
+@@ -0,0 +1,40 @@
++import { dirname, resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import commonjs from "@rollup/plugin-commonjs";
++import resolvePlugin from "@rollup/plugin-node-resolve";
++import typescript from "@rollup/plugin-typescript";
++import { rollup } from "rollup";
++import { expect, test } from "vitest";
++
++const HERE = dirname(fileURLToPath(import.meta.url));
++const PKG_ROOT = resolve(HERE, "..");
++const ZOD_SRC = resolve(PKG_ROOT, "../zod/src");
++
++const ENTRIES = ["zod-full.ts", "zod-string.ts", "zod-mini-full.ts"];
++
++async function circularWarningsFor(entry: string): Promise<string[]> {
++  const warnings: string[] = [];
++  const zodSrc = ZOD_SRC.replace(/\\/g, "/");
++  await rollup({
++    input: resolve(PKG_ROOT, entry),
++    plugins: [
++      resolvePlugin({ exportConditions: ["@zod/source", "default"] }),
++      commonjs(),
++      typescript({ tsconfig: false }),
++    ],
++    onwarn(warning) {
++      if (warning.code !== "CIRCULAR_DEPENDENCY") return;
++      const ids = (warning.ids ?? []).map((id) => id.replace(/\\/g, "/"));
++      if (ids.some((id) => id.includes(zodSrc))) warnings.push(ids.join(" -> "));
++    },
++  });
++  return warnings;
++}
++
++test.concurrent.each(ENTRIES)(
++  "rollup reports no circular deps in zod source for %s (regression: #5275)",
++  async (entry) => {
++    const warnings = await circularWarningsFor(entry);
++    expect(warnings).toEqual([]);
++  }
++);
+diff --git a/packages/treeshake/vitest.config.ts b/packages/treeshake/vitest.config.ts
+new file mode 100644
+index 0000000000..3ee6c71fd6
+--- /dev/null
++++ b/packages/treeshake/vitest.config.ts
+@@ -0,0 +1,11 @@
++import { defineProject } from "vitest/config";
++
++export default defineProject({
++  resolve: {
++    conditions: ["@zod/source", "default"],
++  },
++  test: {
++    include: ["tests/**/*.test.ts"],
++    testTimeout: 60000,
++  },
++});
+diff --git a/packages/zod/src/v4/classic/iso.ts b/packages/zod/src/v4/classic/iso.ts
+index b08696d678..34cb978c36 100644
+--- a/packages/zod/src/v4/classic/iso.ts
++++ b/packages/zod/src/v4/classic/iso.ts
+@@ -1,90 +1,20 @@
+ import * as core from "../core/index.js";
+-import * as schemas from "./schemas.js";
++import { ZodISODate, ZodISODateTime, ZodISODuration, ZodISOTime } from "./schemas.js";
+ 
+-//////////////////////////////////////////////
+-//////////////////////////////////////////////
+-//////////                          //////////
+-//////////      ZodISODateTime      //////////
+-//////////                          //////////
+-//////////////////////////////////////////////
+-//////////////////////////////////////////////
+-
+-export interface ZodISODateTime extends schemas.ZodStringFormat {
+-  _zod: core.$ZodISODateTimeInternals;
+-}
+-export const ZodISODateTime: core.$constructor<ZodISODateTime> = /*@__PURE__*/ core.$constructor(
+-  "ZodISODateTime",
+-  (inst, def) => {
+-    core.$ZodISODateTime.init(inst, def);
+-    schemas.ZodStringFormat.init(inst, def);
+-  }
+-);
++export { ZodISODate, ZodISODateTime, ZodISODuration, ZodISOTime } from "./schemas.js";
+ 
+ export function datetime(params?: string | core.$ZodISODateTimeParams): ZodISODateTime {
+   return core._isoDateTime(ZodISODateTime, params);
+ }
+ 
+-//////////////////////////////////////////
+-//////////////////////////////////////////
+-//////////                      //////////
+-//////////      ZodISODate      //////////
+-//////////                      //////////
+-//////////////////////////////////////////
+-//////////////////////////////////////////
+-
+-export interface ZodISODate extends schemas.ZodStringFormat {
+-  _zod: core.$ZodISODateInternals;
+-}
+-export const ZodISODate: core.$constructor<ZodISODate> = /*@__PURE__*/ core.$constructor("ZodISODate", (inst, def) => {
+-  core.$ZodISODate.init(inst, def);
+-  schemas.ZodStringFormat.init(inst, def);
+-});
+-
+ export function date(params?: string | core.$ZodISODateParams): ZodISODate {
+   return core._isoDate(ZodISODate, params);
+ }
+ 
+-// ZodISOTime
+-
+-//////////////////////////////////////////
+-//////////////////////////////////////////
+-//////////                      //////////
+-//////////      ZodISOTime      //////////
+-//////////                      //////////
+-//////////////////////////////////////////
+-//////////////////////////////////////////
+-
+-export interface ZodISOTime extends schemas.ZodStringFormat {
+-  _zod: core.$ZodISOTimeInternals;
+-}
+-export const ZodISOTime: core.$constructor<ZodISOTime> = /*@__PURE__*/ core.$constructor("ZodISOTime", (inst, def) => {
+-  core.$ZodISOTime.init(inst, def);
+-  schemas.ZodStringFormat.init(inst, def);
+-});
+-
+ export function time(params?: string | core.$ZodISOTimeParams): ZodISOTime {
+   return core._isoTime(ZodISOTime, params);
+ }
+ 
+-//////////////////////////////////////////////
+-//////////////////////////////////////////////
+-//////////                          //////////
+-//////////      ZodISODuration      //////////
+-//////////                          //////////
+-//////////////////////////////////////////////
+-//////////////////////////////////////////////
+-
+-export interface ZodISODuration extends schemas.ZodStringFormat {
+-  _zod: core.$ZodISODurationInternals;
+-}
+-export const ZodISODuration: core.$constructor<ZodISODuration> = /*@__PURE__*/ core.$constructor(
+-  "ZodISODuration",
+-  (inst, def) => {
+-    core.$ZodISODuration.init(inst, def);
+-    schemas.ZodStringFormat.init(inst, def);
+-  }
+-);
+-
+ export function duration(params?: string | core.$ZodISODurationParams): ZodISODuration {
+   return core._isoDuration(ZodISODuration, params);
+ }
+diff --git a/packages/zod/src/v4/classic/schemas.ts b/packages/zod/src/v4/classic/schemas.ts
+index 3e052fe3e1..9db1ade507 100644
+--- a/packages/zod/src/v4/classic/schemas.ts
++++ b/packages/zod/src/v4/classic/schemas.ts
+@@ -5,7 +5,6 @@ import type { StandardSchemaWithJSONProps } from "../core/standard-schema.js";
+ import { createStandardJSONSchemaMethod, createToJSONSchemaMethod } from "../core/to-json-schema.js";
+ 
+ import * as checks from "./checks.js";
+-import * as iso from "./iso.js";
+ import * as parse from "./parse.js";
+ 
+ // Lazy-bind builder methods.
+@@ -559,10 +558,10 @@ export const ZodString: core.$constructor<ZodString> = /*@__PURE__*/ core.$const
+   inst.e164 = (params) => inst.check(core._e164(ZodE164, params));
+ 
+   // iso
+-  inst.datetime = (params) => inst.check(iso.datetime(params as any));
+-  inst.date = (params) => inst.check(iso.date(params as any));
+-  inst.time = (params) => inst.check(iso.time(params as any));
+-  inst.duration = (params) => inst.check(iso.duration(params as any));
++  inst.datetime = (params) => inst.check(core._isoDateTime(ZodISODateTime, params as any));
++  inst.date = (params) => inst.check(core._isoDate(ZodISODate, params as any));
++  inst.time = (params) => inst.check(core._isoTime(ZodISOTime, params as any));
++  inst.duration = (params) => inst.check(core._isoDuration(ZodISODuration, params as any));
+ });
+ 
+ export function string(params?: string | core.$ZodStringParams): ZodString;
+@@ -582,6 +581,72 @@ export const ZodStringFormat: core.$constructor<ZodStringFormat> = /*@__PURE__*/
+   }
+ );
+ 
++//////////////////////////////////////////////
++//////////////////////////////////////////////
++//////////                          //////////
++//////////      ZodISODateTime      //////////
++//////////                          //////////
++//////////////////////////////////////////////
++//////////////////////////////////////////////
++export interface ZodISODateTime extends ZodStringFormat {
++  _zod: core.$ZodISODateTimeInternals;
++}
++export const ZodISODateTime: core.$constructor<ZodISODateTime> = /*@__PURE__*/ core.$constructor(
++  "ZodISODateTime",
++  (inst, def) => {
++    core.$ZodISODateTime.init(inst, def);
++    ZodStringFormat.init(inst, def);
++  }
++);
++
++//////////////////////////////////////////
++//////////////////////////////////////////
++//////////                      //////////
++//////////      ZodISODate      //////////
++//////////                      //////////
++//////////////////////////////////////////
++//////////////////////////////////////////
++export interface ZodISODate extends ZodStringFormat {
++  _zod: core.$ZodISODateInternals;
++}
++export const ZodISODate: core.$constructor<ZodISODate> = /*@__PURE__*/ core.$constructor("ZodISODate", (inst, def) => {
++  core.$ZodISODate.init(inst, def);
++  ZodStringFormat.init(inst, def);
++});
++
++//////////////////////////////////////////
++//////////////////////////////////////////
++//////////                      //////////
++//////////      ZodISOTime      //////////
++//////////                      //////////
++//////////////////////////////////////////
++//////////////////////////////////////////
++export interface ZodISOTime extends ZodStringFormat {
++  _zod: core.$ZodISOTimeInternals;
++}
++export const ZodISOTime: core.$constructor<ZodISOTime> = /*@__PURE__*/ core.$constructor("ZodISOTime", (inst, def) => {
++  core.$ZodISOTime.init(inst, def);
++  ZodStringFormat.init(inst, def);
++});
++
++//////////////////////////////////////////////
++//////////////////////////////////////////////
++//////////                          //////////
++//////////      ZodISODuration      //////////
++//////////                          //////////
++//////////////////////////////////////////////
++//////////////////////////////////////////////
++export interface ZodISODuration extends ZodStringFormat {
++  _zod: core.$ZodISODurationInternals;
++}
++export const ZodISODuration: core.$constructor<ZodISODuration> = /*@__PURE__*/ core.$constructor(
++  "ZodISODuration",
++  (inst, def) => {
++    core.$ZodISODuration.init(inst, def);
++    ZodStringFormat.init(inst, def);
++  }
++);
++
+ // ZodEmail
+ export interface ZodEmail extends ZodStringFormat<"email"> {
+   _zod: core.$ZodEmailInternals;
+diff --git a/packages/zod/src/v4/classic/tests/no-circular-imports.test.ts b/packages/zod/src/v4/classic/tests/no-circular-imports.test.ts
+new file mode 100644
+index 0000000000..f8666cba8a
+--- /dev/null
++++ b/packages/zod/src/v4/classic/tests/no-circular-imports.test.ts
+@@ -0,0 +1,67 @@
++import { readFileSync, readdirSync, statSync } from "node:fs";
++import { dirname, relative, resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import { expect, test } from "vitest";
++
++const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
++
++function listSourceFiles(dir: string): string[] {
++  const out: string[] = [];
++  for (const name of readdirSync(dir)) {
++    if (name === "tests" || name === "node_modules") continue;
++    const p = resolve(dir, name);
++    if (statSync(p).isDirectory()) out.push(...listSourceFiles(p));
++    else if (p.endsWith(".ts") && !p.endsWith(".d.ts")) out.push(p);
++  }
++  return out;
++}
++
++function relativeImports(file: string): string[] {
++  const src = readFileSync(file, "utf-8");
++  const re = /(?:^|\n)\s*(?:import|export)[^"';\n]*from\s+["'](\.[^"']+)["']/g;
++  const dir = dirname(file);
++  const targets: string[] = [];
++  for (const m of src.matchAll(re)) {
++    targets.push(resolve(dir, m[1]!.replace(/\.js$/, ".ts")));
++  }
++  return targets;
++}
++
++function findCycles(graph: Map<string, string[]>): string[][] {
++  const cycles: string[][] = [];
++  const stack: string[] = [];
++  const onStack = new Set<string>();
++  const visited = new Set<string>();
++  const seenCycles = new Set<string>();
++
++  function dfs(node: string) {
++    if (onStack.has(node)) {
++      const i = stack.indexOf(node);
++      const cycle = stack.slice(i).concat(node);
++      const key = [...cycle].sort().join("|");
++      if (!seenCycles.has(key)) {
++        seenCycles.add(key);
++        cycles.push(cycle);
++      }
++      return;
++    }
++    if (visited.has(node)) return;
++    visited.add(node);
++    onStack.add(node);
++    stack.push(node);
++    for (const next of graph.get(node) ?? []) dfs(next);
++    stack.pop();
++    onStack.delete(node);
++  }
++
++  for (const n of graph.keys()) dfs(n);
++  return cycles;
++}
++
++test("v4/classic has no circular imports (regression: #5275)", () => {
++  const files = listSourceFiles(ROOT);
++  const fileSet = new Set(files);
++  const graph = new Map(files.map((f) => [f, relativeImports(f).filter((t) => fileSet.has(t))]));
++  const cycles = findCycles(graph).map((c) => c.map((p) => relative(ROOT, p)));
++  expect(cycles).toEqual([]);
++});
+
+From f76bd1aed65af5ae5e16077c4123ae91e3c6b737 Mon Sep 17 00:00:00 2001
+From: Alessandro Colace <ale.colace@gmail.com>
+Date: Sat, 2 May 2026 00:45:36 +0200
+Subject: [PATCH 2/2] test(treeshake): bump testTimeout to 180s for CI
+ cold-start
+
+The 3 concurrent rollup builds in no-circular-imports.test.ts run ~35s
+locally on Windows but exceed the 60s default on Linux CI cold-start
+(rollup is CPU-bound on TS parsing; concurrency doesn't help much).
+Bump to 180s so the regression test for #5275 doesn't time out.
+---
+ packages/treeshake/vitest.config.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/treeshake/vitest.config.ts b/packages/treeshake/vitest.config.ts
+index 3ee6c71fd6..785b6de085 100644
+--- a/packages/treeshake/vitest.config.ts
++++ b/packages/treeshake/vitest.config.ts
+@@ -6,6 +6,6 @@ export default defineProject({
+   },
+   test: {
+     include: ["tests/**/*.test.ts"],
+-    testTimeout: 60000,
++    testTimeout: 180000,
+   },
+ });

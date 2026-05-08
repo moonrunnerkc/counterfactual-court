@@ -1,0 +1,872 @@
+From a94d9c2db752a5cfcfb38e3d876342ab5c9a46b5 Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Sat, 25 Apr 2026 14:40:55 +0300
+Subject: [PATCH 1/5] chore: enable meta.defaultOptions linting
+
+---
+ eslint.config.js | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/eslint.config.js b/eslint.config.js
+index 5dda71325983..50d0e2b56e5e 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -11,6 +11,7 @@
+ 
+ const path = require("node:path");
+ const internalPlugin = require("./tools/internal-rules");
++const coreRules = require("./lib/rules");
+ const eslintPluginESLint = require("eslint-plugin-eslint-plugin").default;
+ const globals = require("globals");
+ const eslintConfigESLintCJS = require("eslint-config-eslint/cjs");
+@@ -39,6 +40,9 @@ const INTERNAL_FILES = Object.fromEntries(
+ 
+ const ALL_JS_FILES = "**/*.js";
+ const ALL_YAML_FILES = "**/*.y?(a)ml";
++const DEPRECATED_CORE_RULE_FILES = Array.from(coreRules.entries())
++	.filter(([, rule]) => rule.meta.deprecated)
++	.map(([ruleId]) => `lib/rules/${ruleId}.js`);
+ 
+ /**
+  * Resolve an absolute path or glob pattern.
+@@ -135,8 +139,17 @@ module.exports = defineConfig([
+ 			"internal-rules/no-invalid-meta": "error",
+ 
+ 			"eslint-plugin/require-meta-schema-description": "off",
+-
+-			// TODO: Consider enabling these for non-deprecated rules
++			"eslint-plugin/no-meta-schema-default": "error",
++			"eslint-plugin/require-meta-default-options": "error",
++		},
++	},
++	{
++		name: "eslint/deprecated-rules",
++		files: DEPRECATED_CORE_RULE_FILES,
++		plugins: {
++			"eslint-plugin": eslintPluginESLint,
++		},
++		rules: {
+ 			"eslint-plugin/no-meta-schema-default": "off",
+ 			"eslint-plugin/require-meta-default-options": "off",
+ 		},
+
+From 7ec6ebe42ccdb854abbeaf522add4ca6c92f60ae Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Sun, 26 Apr 2026 19:31:29 +0300
+Subject: [PATCH 2/5] enable meta.defaultOptions linting
+
+---
+ eslint.config.js                          | 15 +++-
+ lib/rules/capitalized-comments.js         |  4 +-
+ lib/rules/eqeqeq.js                       |  4 +-
+ lib/rules/func-name-matching.js           |  2 +
+ lib/rules/init-declarations.js            |  5 +-
+ lib/rules/logical-assignment-operators.js |  5 +-
+ lib/rules/max-classes-per-file.js         |  6 +-
+ lib/rules/max-depth.js                    |  3 +
+ lib/rules/max-lines-per-function.js       |  3 +
+ lib/rules/max-lines.js                    |  3 +
+ lib/rules/max-nested-callbacks.js         |  3 +
+ lib/rules/max-params.js                   |  3 +
+ lib/rules/max-statements.js               |  3 +
+ lib/rules/no-magic-numbers.js             | 50 +++++++------
+ lib/rules/no-param-reassign.js            | 17 +++--
+ lib/rules/no-restricted-exports.js        | 16 ++---
+ lib/rules/no-restricted-properties.js     |  2 +
+ lib/rules/no-restricted-syntax.js         |  2 +
+ lib/rules/no-unused-vars.js               | 88 +++++++++++------------
+ lib/rules/object-shorthand.js             |  4 +-
+ lib/rules/one-var.js                      |  4 +-
+ 21 files changed, 148 insertions(+), 94 deletions(-)
+
+diff --git a/eslint.config.js b/eslint.config.js
+index 50d0e2b56e5e..d6abcebe3f6a 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -146,14 +146,23 @@ module.exports = defineConfig([
+ 	{
+ 		name: "eslint/deprecated-rules",
+ 		files: DEPRECATED_CORE_RULE_FILES,
+-		plugins: {
+-			"eslint-plugin": eslintPluginESLint,
+-		},
+ 		rules: {
+ 			"eslint-plugin/no-meta-schema-default": "off",
+ 			"eslint-plugin/require-meta-default-options": "off",
+ 		},
+ 	},
++	{
++		name: "eslint/rules-without-default-options",
++		files: [
++			"lib/rules/no-restricted-globals.js",
++			"lib/rules/no-restricted-imports.js",
++			"lib/rules/prefer-destructuring.js",
++			"lib/rules/radix.js",
++		],
++		rules: {
++			"eslint-plugin/require-meta-default-options": "off",
++		},
++	},
+ 	{
+ 		name: "eslint/core-rules",
+ 		files: ["lib/rules/*.js"],
+diff --git a/lib/rules/capitalized-comments.js b/lib/rules/capitalized-comments.js
+index 66e2566136ab..51b4eb791b38 100644
+--- a/lib/rules/capitalized-comments.js
++++ b/lib/rules/capitalized-comments.js
+@@ -131,6 +131,8 @@ module.exports = {
+ 			},
+ 		],
+ 
++		defaultOptions: ["always"],
++
+ 		messages: {
+ 			unexpectedLowercaseComment:
+ 				"Comments should not begin with a lowercase character.",
+@@ -140,7 +142,7 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const capitalize = context.options[0] || "always",
++		const capitalize = context.options[0],
+ 			normalizedOptions = getAllNormalizedOptions(context.options[1]),
+ 			sourceCode = context.sourceCode;
+ 
+diff --git a/lib/rules/eqeqeq.js b/lib/rules/eqeqeq.js
+index cfe5bd4cff69..80eeb4ee32f3 100644
+--- a/lib/rules/eqeqeq.js
++++ b/lib/rules/eqeqeq.js
+@@ -59,6 +59,8 @@ module.exports = {
+ 			],
+ 		},
+ 
++		defaultOptions: ["always"],
++
+ 		fixable: "code",
+ 
+ 		messages: {
+@@ -70,7 +72,7 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const config = context.options[0] || "always";
++		const config = context.options[0];
+ 		const options = context.options[1] || {};
+ 		const sourceCode = context.sourceCode;
+ 
+diff --git a/lib/rules/func-name-matching.js b/lib/rules/func-name-matching.js
+index 4643bfbc4f98..e276f5cc5786 100644
+--- a/lib/rules/func-name-matching.js
++++ b/lib/rules/func-name-matching.js
+@@ -105,6 +105,8 @@ module.exports = {
+ 			],
+ 		},
+ 
++		defaultOptions: ["always"],
++
+ 		messages: {
+ 			matchProperty:
+ 				"Function name `{{funcName}}` should match property name `{{name}}`.",
+diff --git a/lib/rules/init-declarations.js b/lib/rules/init-declarations.js
+index 15dac379fada..0f1e4472611a 100644
+--- a/lib/rules/init-declarations.js
++++ b/lib/rules/init-declarations.js
+@@ -94,6 +94,9 @@ module.exports = {
+ 				},
+ 			],
+ 		},
++
++		defaultOptions: ["always"],
++
+ 		messages: {
+ 			initialized:
+ 				"Variable '{{idName}}' should be initialized on declaration.",
+@@ -106,7 +109,7 @@ module.exports = {
+ 		const MODE_ALWAYS = "always",
+ 			MODE_NEVER = "never";
+ 
+-		const mode = context.options[0] || MODE_ALWAYS;
++		const mode = context.options[0];
+ 		const params = context.options[1] || {};
+ 
+ 		// Track whether we're inside a declared namespace
+diff --git a/lib/rules/logical-assignment-operators.js b/lib/rules/logical-assignment-operators.js
+index 38103f16c5b5..8564b19b1f18 100644
+--- a/lib/rules/logical-assignment-operators.js
++++ b/lib/rules/logical-assignment-operators.js
+@@ -259,6 +259,9 @@ module.exports = {
+ 				},
+ 			],
+ 		},
++
++		defaultOptions: ["always"],
++
+ 		fixable: "code",
+ 		hasSuggestions: true,
+ 		messages: {
+@@ -281,7 +284,7 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const mode = context.options[0] === "never" ? "never" : "always";
++		const mode = context.options[0];
+ 		const checkIf =
+ 			mode === "always" &&
+ 			context.options.length > 1 &&
+diff --git a/lib/rules/max-classes-per-file.js b/lib/rules/max-classes-per-file.js
+index 3ede9edf2edd..6232c85816ca 100644
+--- a/lib/rules/max-classes-per-file.js
++++ b/lib/rules/max-classes-per-file.js
+@@ -47,16 +47,18 @@ module.exports = {
+ 			},
+ 		],
+ 
++		defaultOptions: [1],
++
+ 		messages: {
+ 			maximumExceeded:
+ 				"File has too many classes ({{ classCount }}). Maximum allowed is {{ max }}.",
+ 		},
+ 	},
+ 	create(context) {
+-		const [option = {}] = context.options;
++		const option = context.options[0];
+ 		const [ignoreExpressions, max] =
+ 			typeof option === "number"
+-				? [false, option || 1]
++				? [false, option]
+ 				: [option.ignoreExpressions, option.max || 1];
+ 
+ 		let classCount = 0;
+diff --git a/lib/rules/max-depth.js b/lib/rules/max-depth.js
+index f3c66b7aecd2..f4abfcc56212 100644
+--- a/lib/rules/max-depth.js
++++ b/lib/rules/max-depth.js
+@@ -44,6 +44,9 @@ module.exports = {
+ 				],
+ 			},
+ 		],
++
++		defaultOptions: [4],
++
+ 		messages: {
+ 			tooDeeply:
+ 				"Blocks are nested too deeply ({{depth}}). Maximum allowed is {{maxDepth}}.",
+diff --git a/lib/rules/max-lines-per-function.js b/lib/rules/max-lines-per-function.js
+index fd9a783f4f25..515feeb2e475 100644
+--- a/lib/rules/max-lines-per-function.js
++++ b/lib/rules/max-lines-per-function.js
+@@ -78,6 +78,9 @@ module.exports = {
+ 		},
+ 
+ 		schema: [OPTIONS_OR_INTEGER_SCHEMA],
++
++		defaultOptions: [50],
++
+ 		messages: {
+ 			exceed: "{{name}} has too many lines ({{lineCount}}). Maximum allowed is {{maxLines}}.",
+ 		},
+diff --git a/lib/rules/max-lines.js b/lib/rules/max-lines.js
+index eb8aeb1a7e26..6847bde0a020 100644
+--- a/lib/rules/max-lines.js
++++ b/lib/rules/max-lines.js
+@@ -65,6 +65,9 @@ module.exports = {
+ 				],
+ 			},
+ 		],
++
++		defaultOptions: [300],
++
+ 		messages: {
+ 			exceed: "File has too many lines ({{actual}}). Maximum allowed is {{max}}.",
+ 		},
+diff --git a/lib/rules/max-nested-callbacks.js b/lib/rules/max-nested-callbacks.js
+index e97483a62db1..f37445db89de 100644
+--- a/lib/rules/max-nested-callbacks.js
++++ b/lib/rules/max-nested-callbacks.js
+@@ -44,6 +44,9 @@ module.exports = {
+ 				],
+ 			},
+ 		],
++
++		defaultOptions: [10],
++
+ 		messages: {
+ 			exceed: "Too many nested callbacks ({{num}}). Maximum allowed is {{max}}.",
+ 		},
+diff --git a/lib/rules/max-params.js b/lib/rules/max-params.js
+index 2967082c5d2d..d7641e39f71f 100644
+--- a/lib/rules/max-params.js
++++ b/lib/rules/max-params.js
+@@ -65,6 +65,9 @@ module.exports = {
+ 				],
+ 			},
+ 		],
++
++		defaultOptions: [3],
++
+ 		messages: {
+ 			exceed: "{{name}} has too many parameters ({{count}}). Maximum allowed is {{max}}.",
+ 		},
+diff --git a/lib/rules/max-statements.js b/lib/rules/max-statements.js
+index c38482cd1a1b..f771583b4e1c 100644
+--- a/lib/rules/max-statements.js
++++ b/lib/rules/max-statements.js
+@@ -61,6 +61,9 @@ module.exports = {
+ 				additionalProperties: false,
+ 			},
+ 		],
++
++		defaultOptions: [10],
++
+ 		messages: {
+ 			exceed: "{{name}} has too many statements ({{count}}). Maximum allowed is {{max}}.",
+ 		},
+diff --git a/lib/rules/no-magic-numbers.js b/lib/rules/no-magic-numbers.js
+index bed61a0684fb..b141456abd11 100644
+--- a/lib/rules/no-magic-numbers.js
++++ b/lib/rules/no-magic-numbers.js
+@@ -107,11 +107,9 @@ module.exports = {
+ 				properties: {
+ 					detectObjects: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					enforceConst: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignore: {
+ 						type: "array",
+@@ -128,37 +126,45 @@ module.exports = {
+ 					},
+ 					ignoreArrayIndexes: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignoreDefaultValues: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignoreClassFieldInitialValues: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignoreEnums: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignoreNumericLiteralTypes: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignoreReadonlyClassProperties: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 					ignoreTypeIndexes: {
+ 						type: "boolean",
+-						default: false,
+ 					},
+ 				},
+ 				additionalProperties: false,
+ 			},
+ 		],
+ 
++		defaultOptions: [
++			{
++				detectObjects: false,
++				enforceConst: false,
++				ignore: [],
++				ignoreArrayIndexes: false,
++				ignoreDefaultValues: false,
++				ignoreClassFieldInitialValues: false,
++				ignoreEnums: false,
++				ignoreNumericLiteralTypes: false,
++				ignoreReadonlyClassProperties: false,
++				ignoreTypeIndexes: false,
++			},
++		],
++
+ 		messages: {
+ 			useConst: "Number constants declarations must use 'const'.",
+ 			noMagic: "No magic number: {{raw}}.",
+@@ -166,19 +172,19 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const config = context.options[0] || {},
+-			detectObjects = !!config.detectObjects,
+-			enforceConst = !!config.enforceConst,
+-			ignore = new Set((config.ignore || []).map(normalizeIgnoreValue)),
+-			ignoreArrayIndexes = !!config.ignoreArrayIndexes,
+-			ignoreDefaultValues = !!config.ignoreDefaultValues,
+-			ignoreClassFieldInitialValues =
+-				!!config.ignoreClassFieldInitialValues,
+-			ignoreEnums = !!config.ignoreEnums,
+-			ignoreNumericLiteralTypes = !!config.ignoreNumericLiteralTypes,
+-			ignoreReadonlyClassProperties =
+-				!!config.ignoreReadonlyClassProperties,
+-			ignoreTypeIndexes = !!config.ignoreTypeIndexes;
++		const {
++			detectObjects,
++			enforceConst,
++			ignore: rawIgnore,
++			ignoreArrayIndexes,
++			ignoreDefaultValues,
++			ignoreClassFieldInitialValues,
++			ignoreEnums,
++			ignoreNumericLiteralTypes,
++			ignoreReadonlyClassProperties,
++			ignoreTypeIndexes,
++		} = context.options[0];
++		const ignore = new Set(rawIgnore.map(normalizeIgnoreValue));
+ 
+ 		const okTypes = detectObjects
+ 			? []
+diff --git a/lib/rules/no-param-reassign.js b/lib/rules/no-param-reassign.js
+index ec22030a7187..edd6f9834783 100644
+--- a/lib/rules/no-param-reassign.js
++++ b/lib/rules/no-param-reassign.js
+@@ -61,6 +61,8 @@ module.exports = {
+ 			},
+ 		],
+ 
++		defaultOptions: [{ props: false }],
++
+ 		messages: {
+ 			assignmentToFunctionParam:
+ 				"Assignment to function parameter '{{name}}'.",
+@@ -70,15 +72,12 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const props = context.options[0] && context.options[0].props;
+-		const ignoredPropertyAssignmentsFor =
+-			(context.options[0] &&
+-				context.options[0].ignorePropertyModificationsFor) ||
+-			[];
+-		const ignoredPropertyAssignmentsForRegex =
+-			(context.options[0] &&
+-				context.options[0].ignorePropertyModificationsForRegex) ||
+-			[];
++		const {
++			props,
++			ignorePropertyModificationsFor: ignoredPropertyAssignmentsFor = [],
++			ignorePropertyModificationsForRegex:
++				ignoredPropertyAssignmentsForRegex = [],
++		} = context.options[0];
+ 		const sourceCode = context.sourceCode;
+ 
+ 		/**
+diff --git a/lib/rules/no-restricted-exports.js b/lib/rules/no-restricted-exports.js
+index fd5ff4b5abe2..89c0210591ea 100644
+--- a/lib/rules/no-restricted-exports.js
++++ b/lib/rules/no-restricted-exports.js
+@@ -92,6 +92,8 @@ module.exports = {
+ 			},
+ 		],
+ 
++		defaultOptions: [{}],
++
+ 		messages: {
+ 			restrictedNamed:
+ 				"'{{name}}' is restricted from being used as an exported name.",
+@@ -100,14 +102,12 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const restrictedNames = new Set(
+-			context.options[0] && context.options[0].restrictedNamedExports,
+-		);
+-		const restrictedNamePattern =
+-			context.options[0] &&
+-			context.options[0].restrictedNamedExportsPattern;
+-		const restrictDefaultExports =
+-			context.options[0] && context.options[0].restrictDefaultExports;
++		const {
++			restrictedNamedExports,
++			restrictedNamedExportsPattern: restrictedNamePattern,
++			restrictDefaultExports,
++		} = context.options[0];
++		const restrictedNames = new Set(restrictedNamedExports);
+ 		const sourceCode = context.sourceCode;
+ 
+ 		/**
+diff --git a/lib/rules/no-restricted-properties.js b/lib/rules/no-restricted-properties.js
+index 95dbd67d87fe..8a671e0ecf1a 100644
+--- a/lib/rules/no-restricted-properties.js
++++ b/lib/rules/no-restricted-properties.js
+@@ -70,6 +70,8 @@ module.exports = {
+ 			uniqueItems: true,
+ 		},
+ 
++		defaultOptions: [],
++
+ 		messages: {
+ 			restrictedObjectProperty:
+ 				// eslint-disable-next-line eslint-plugin/report-message-format -- Custom message might not end in a period
+diff --git a/lib/rules/no-restricted-syntax.js b/lib/rules/no-restricted-syntax.js
+index 447d29cf1bc0..c9453df9ec2f 100644
+--- a/lib/rules/no-restricted-syntax.js
++++ b/lib/rules/no-restricted-syntax.js
+@@ -41,6 +41,8 @@ module.exports = {
+ 			minItems: 0,
+ 		},
+ 
++		defaultOptions: [],
++
+ 		messages: {
+ 			// eslint-disable-next-line eslint-plugin/report-message-format -- Custom message might not end in a period
+ 			restrictedSyntax: "{{message}}",
+diff --git a/lib/rules/no-unused-vars.js b/lib/rules/no-unused-vars.js
+index 5527d43f037a..1ffcd8e18f37 100644
+--- a/lib/rules/no-unused-vars.js
++++ b/lib/rules/no-unused-vars.js
+@@ -108,6 +108,8 @@ module.exports = {
+ 			},
+ 		],
+ 
++		defaultOptions: ["all"],
++
+ 		messages: {
+ 			unusedVar:
+ 				"'{{varName}}' is {{action}} but never used{{additional}}.",
+@@ -135,53 +137,51 @@ module.exports = {
+ 
+ 		const firstOption = context.options[0];
+ 
+-		if (firstOption) {
+-			if (typeof firstOption === "string") {
+-				config.vars = firstOption;
+-			} else {
+-				config.vars = firstOption.vars || config.vars;
+-				config.args = firstOption.args || config.args;
+-				config.ignoreRestSiblings =
+-					firstOption.ignoreRestSiblings || config.ignoreRestSiblings;
+-				config.caughtErrors =
+-					firstOption.caughtErrors || config.caughtErrors;
+-				config.ignoreClassWithStaticInitBlock =
+-					firstOption.ignoreClassWithStaticInitBlock ||
+-					config.ignoreClassWithStaticInitBlock;
+-				config.ignoreUsingDeclarations =
+-					firstOption.ignoreUsingDeclarations ||
+-					config.ignoreUsingDeclarations;
+-				config.reportUsedIgnorePattern =
+-					firstOption.reportUsedIgnorePattern ||
+-					config.reportUsedIgnorePattern;
+-
+-				if (firstOption.varsIgnorePattern) {
+-					config.varsIgnorePattern = new RegExp(
+-						firstOption.varsIgnorePattern,
+-						"u",
+-					);
+-				}
++		if (typeof firstOption === "string") {
++			config.vars = firstOption;
++		} else {
++			config.vars = firstOption.vars || config.vars;
++			config.args = firstOption.args || config.args;
++			config.ignoreRestSiblings =
++				firstOption.ignoreRestSiblings || config.ignoreRestSiblings;
++			config.caughtErrors =
++				firstOption.caughtErrors || config.caughtErrors;
++			config.ignoreClassWithStaticInitBlock =
++				firstOption.ignoreClassWithStaticInitBlock ||
++				config.ignoreClassWithStaticInitBlock;
++			config.ignoreUsingDeclarations =
++				firstOption.ignoreUsingDeclarations ||
++				config.ignoreUsingDeclarations;
++			config.reportUsedIgnorePattern =
++				firstOption.reportUsedIgnorePattern ||
++				config.reportUsedIgnorePattern;
++
++			if (firstOption.varsIgnorePattern) {
++				config.varsIgnorePattern = new RegExp(
++					firstOption.varsIgnorePattern,
++					"u",
++				);
++			}
+ 
+-				if (firstOption.argsIgnorePattern) {
+-					config.argsIgnorePattern = new RegExp(
+-						firstOption.argsIgnorePattern,
+-						"u",
+-					);
+-				}
++			if (firstOption.argsIgnorePattern) {
++				config.argsIgnorePattern = new RegExp(
++					firstOption.argsIgnorePattern,
++					"u",
++				);
++			}
+ 
+-				if (firstOption.caughtErrorsIgnorePattern) {
+-					config.caughtErrorsIgnorePattern = new RegExp(
+-						firstOption.caughtErrorsIgnorePattern,
+-						"u",
+-					);
+-				}
++			if (firstOption.caughtErrorsIgnorePattern) {
++				config.caughtErrorsIgnorePattern = new RegExp(
++					firstOption.caughtErrorsIgnorePattern,
++					"u",
++				);
++			}
+ 
+-				if (firstOption.destructuredArrayIgnorePattern) {
+-					config.destructuredArrayIgnorePattern = new RegExp(
+-						firstOption.destructuredArrayIgnorePattern,
+-						"u",
+-					);
+-				}
++			if (firstOption.destructuredArrayIgnorePattern) {
++				config.destructuredArrayIgnorePattern = new RegExp(
++					firstOption.destructuredArrayIgnorePattern,
++					"u",
++				);
+ 			}
+ 		}
+ 
+diff --git a/lib/rules/object-shorthand.js b/lib/rules/object-shorthand.js
+index 916d5374d4a8..bb49833b01b2 100644
+--- a/lib/rules/object-shorthand.js
++++ b/lib/rules/object-shorthand.js
+@@ -186,6 +186,8 @@ module.exports = {
+ 			],
+ 		},
+ 
++		defaultOptions: ["always"],
++
+ 		messages: {
+ 			expectedAllPropertiesShorthanded:
+ 				"Expected shorthand for all properties.",
+@@ -201,7 +203,7 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const APPLY = context.options[0] || OPTIONS.always;
++		const APPLY = context.options[0];
+ 		const APPLY_TO_METHODS =
+ 			APPLY === OPTIONS.methods || APPLY === OPTIONS.always;
+ 		const APPLY_TO_PROPS =
+diff --git a/lib/rules/one-var.js b/lib/rules/one-var.js
+index 6a4cc074d667..4241afa71135 100644
+--- a/lib/rules/one-var.js
++++ b/lib/rules/one-var.js
+@@ -89,6 +89,8 @@ module.exports = {
+ 			},
+ 		],
+ 
++		defaultOptions: ["always"],
++
+ 		messages: {
+ 			combineUninitialized:
+ 				"Combine this with the previous '{{type}}' statement with uninitialized variables.",
+@@ -109,7 +111,7 @@ module.exports = {
+ 		const MODE_ALWAYS = "always";
+ 		const MODE_NEVER = "never";
+ 		const MODE_CONSECUTIVE = "consecutive";
+-		const mode = context.options[0] || MODE_ALWAYS;
++		const mode = context.options[0];
+ 
+ 		const options = {};
+ 
+
+From 66ce3294ac0f51020556e55bda119060a7edbefe Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Sat, 2 May 2026 21:11:41 +0300
+Subject: [PATCH 3/5] revert no-param-reassign change
+
+---
+ eslint.config.js               |  1 +
+ lib/rules/no-param-reassign.js | 17 +++++++++--------
+ 2 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/eslint.config.js b/eslint.config.js
+index d6abcebe3f6a..e59abe5de4f9 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -154,6 +154,7 @@ module.exports = defineConfig([
+ 	{
+ 		name: "eslint/rules-without-default-options",
+ 		files: [
++			"lib/rules/no-param-reassign.js",
+ 			"lib/rules/no-restricted-globals.js",
+ 			"lib/rules/no-restricted-imports.js",
+ 			"lib/rules/prefer-destructuring.js",
+diff --git a/lib/rules/no-param-reassign.js b/lib/rules/no-param-reassign.js
+index edd6f9834783..ec22030a7187 100644
+--- a/lib/rules/no-param-reassign.js
++++ b/lib/rules/no-param-reassign.js
+@@ -61,8 +61,6 @@ module.exports = {
+ 			},
+ 		],
+ 
+-		defaultOptions: [{ props: false }],
+-
+ 		messages: {
+ 			assignmentToFunctionParam:
+ 				"Assignment to function parameter '{{name}}'.",
+@@ -72,12 +70,15 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const {
+-			props,
+-			ignorePropertyModificationsFor: ignoredPropertyAssignmentsFor = [],
+-			ignorePropertyModificationsForRegex:
+-				ignoredPropertyAssignmentsForRegex = [],
+-		} = context.options[0];
++		const props = context.options[0] && context.options[0].props;
++		const ignoredPropertyAssignmentsFor =
++			(context.options[0] &&
++				context.options[0].ignorePropertyModificationsFor) ||
++			[];
++		const ignoredPropertyAssignmentsForRegex =
++			(context.options[0] &&
++				context.options[0].ignorePropertyModificationsForRegex) ||
++			[];
+ 		const sourceCode = context.sourceCode;
+ 
+ 		/**
+
+From 1ba0e40c2a3b56065cc377911d89601c59e8f0ac Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Tue, 5 May 2026 01:37:31 +0300
+Subject: [PATCH 4/5] refactor no-unused-vars
+
+---
+ eslint.config.js            |  2 --
+ lib/rules/no-unused-vars.js | 49 +++++++++++++++++--------------------
+ 2 files changed, 23 insertions(+), 28 deletions(-)
+
+diff --git a/eslint.config.js b/eslint.config.js
+index 680849a049d5..6692b8ab3913 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -140,8 +140,6 @@ module.exports = defineConfig([
+ 			"internal-rules/no-invalid-meta": "error",
+ 
+ 			"eslint-plugin/require-meta-schema-description": "off",
+-			"eslint-plugin/no-meta-schema-default": "error",
+-			"eslint-plugin/require-meta-default-options": "error",
+ 		},
+ 	},
+ 	{
+diff --git a/lib/rules/no-unused-vars.js b/lib/rules/no-unused-vars.js
+index 1ffcd8e18f37..cb33993a3a19 100644
+--- a/lib/rules/no-unused-vars.js
++++ b/lib/rules/no-unused-vars.js
+@@ -42,6 +42,20 @@ const astUtils = require("./utils/ast-utils");
+  * @property {string} additional Any additional info to be appended at the end.
+  */
+ 
++//------------------------------------------------------------------------------
++// Helpers
++//------------------------------------------------------------------------------
++
++const DEFAULT_OPTIONS = {
++	vars: "all",
++	args: "after-used",
++	ignoreRestSiblings: false,
++	caughtErrors: "all",
++	ignoreClassWithStaticInitBlock: false,
++	ignoreUsingDeclarations: false,
++	reportUsedIgnorePattern: false,
++};
++
+ //------------------------------------------------------------------------------
+ // Rule Definition
+ //------------------------------------------------------------------------------
+@@ -108,7 +122,7 @@ module.exports = {
+ 			},
+ 		],
+ 
+-		defaultOptions: ["all"],
++		defaultOptions: [DEFAULT_OPTIONS],
+ 
+ 		messages: {
+ 			unusedVar:
+@@ -125,36 +139,19 @@ module.exports = {
+ 		const REST_PROPERTY_TYPE =
+ 			/^(?:RestElement|(?:Experimental)?RestProperty)$/u;
+ 
+-		const config = {
+-			vars: "all",
+-			args: "after-used",
+-			ignoreRestSiblings: false,
+-			caughtErrors: "all",
+-			ignoreClassWithStaticInitBlock: false,
+-			ignoreUsingDeclarations: false,
+-			reportUsedIgnorePattern: false,
+-		};
++		let config;
+ 
+ 		const firstOption = context.options[0];
+ 
+ 		if (typeof firstOption === "string") {
+-			config.vars = firstOption;
++			config = {
++				...DEFAULT_OPTIONS,
++				vars: firstOption,
++			};
+ 		} else {
+-			config.vars = firstOption.vars || config.vars;
+-			config.args = firstOption.args || config.args;
+-			config.ignoreRestSiblings =
+-				firstOption.ignoreRestSiblings || config.ignoreRestSiblings;
+-			config.caughtErrors =
+-				firstOption.caughtErrors || config.caughtErrors;
+-			config.ignoreClassWithStaticInitBlock =
+-				firstOption.ignoreClassWithStaticInitBlock ||
+-				config.ignoreClassWithStaticInitBlock;
+-			config.ignoreUsingDeclarations =
+-				firstOption.ignoreUsingDeclarations ||
+-				config.ignoreUsingDeclarations;
+-			config.reportUsedIgnorePattern =
+-				firstOption.reportUsedIgnorePattern ||
+-				config.reportUsedIgnorePattern;
++			config = {
++				...firstOption,
++			};
+ 
+ 			if (firstOption.varsIgnorePattern) {
+ 				config.varsIgnorePattern = new RegExp(
+
+From 3099a209e86bb7040b7f570945a0e6ac0e23dba7 Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Wed, 6 May 2026 05:01:49 +0300
+Subject: [PATCH 5/5] refactor init-declarations
+
+---
+ lib/rules/init-declarations.js | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/lib/rules/init-declarations.js b/lib/rules/init-declarations.js
+index 0f1e4472611a..7ef794ffc0f0 100644
+--- a/lib/rules/init-declarations.js
++++ b/lib/rules/init-declarations.js
+@@ -106,9 +106,6 @@ module.exports = {
+ 	},
+ 
+ 	create(context) {
+-		const MODE_ALWAYS = "always",
+-			MODE_NEVER = "never";
+-
+ 		const mode = context.options[0];
+ 		const params = context.options[1] || {};
+ 
+@@ -148,10 +145,10 @@ module.exports = {
+ 							params.ignoreForLoopInit && isForLoop(node.parent);
+ 					let messageId = "";
+ 
+-					if (mode === MODE_ALWAYS && !initialized) {
++					if (mode === "always" && !initialized) {
+ 						messageId = "initialized";
+ 					} else if (
+-						mode === MODE_NEVER &&
++						mode === "never" &&
+ 						!CONSTANT_BINDINGS.has(kind) &&
+ 						initialized &&
+ 						!isIgnoredForLoop

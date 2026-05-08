@@ -1,0 +1,360 @@
+From 4e78d6df0070f46285e66c72ccc9a7b9e0fb9940 Mon Sep 17 00:00:00 2001
+From: Sindre Sorhus <sindresorhus@gmail.com>
+Date: Sun, 30 Nov 2025 04:00:33 +0700
+Subject: [PATCH] Ensure all `d.ts` files are considered as ESM
+
+---
+ types/arguments/encoding-option.d.ts | 2 ++
+ types/arguments/fd-options.d.ts      | 2 ++
+ types/arguments/options.d.ts         | 2 ++
+ types/arguments/specific.d.ts        | 2 ++
+ types/convert.d.ts                   | 2 ++
+ types/ipc.d.ts                       | 2 ++
+ types/methods/command.d.ts           | 2 ++
+ types/methods/main-async.d.ts        | 2 ++
+ types/methods/main-sync.d.ts         | 2 ++
+ types/methods/node.d.ts              | 2 ++
+ types/methods/script.d.ts            | 2 ++
+ types/methods/template.d.ts          | 2 ++
+ types/pipe.d.ts                      | 2 ++
+ types/return/final-error.d.ts        | 2 ++
+ types/return/ignore.d.ts             | 2 ++
+ types/return/result-all.d.ts         | 2 ++
+ types/return/result-ipc.d.ts         | 2 ++
+ types/return/result-stdio.d.ts       | 2 ++
+ types/return/result-stdout.d.ts      | 2 ++
+ types/return/result.d.ts             | 2 ++
+ types/stdio/array.d.ts               | 2 ++
+ types/stdio/direction.d.ts           | 2 ++
+ types/stdio/option.d.ts              | 2 ++
+ types/stdio/type.d.ts                | 2 ++
+ types/subprocess/all.d.ts            | 2 ++
+ types/subprocess/stdio.d.ts          | 2 ++
+ types/subprocess/stdout.d.ts         | 2 ++
+ types/subprocess/subprocess.d.ts     | 2 ++
+ types/transform/normalize.d.ts       | 2 ++
+ types/transform/object-mode.d.ts     | 2 ++
+ types/utils.d.ts                     | 2 ++
+ types/verbose.d.ts                   | 2 ++
+ 32 files changed, 64 insertions(+)
+
+diff --git a/types/arguments/encoding-option.d.ts b/types/arguments/encoding-option.d.ts
+index a0a95748ac..04712534c5 100644
+--- a/types/arguments/encoding-option.d.ts
++++ b/types/arguments/encoding-option.d.ts
+@@ -17,3 +17,5 @@ export type EncodingOption =
+ 	| TextEncodingOption
+ 	| BinaryEncodingOption
+ 	| undefined;
++
++export {};
+diff --git a/types/arguments/fd-options.d.ts b/types/arguments/fd-options.d.ts
+index 195d92fdab..ddd4750188 100644
+--- a/types/arguments/fd-options.d.ts
++++ b/types/arguments/fd-options.d.ts
+@@ -6,3 +6,5 @@ export type FromOption = 'stdout' | 'stderr' | 'all' | FileDescriptorOption;
+ 
+ // `to` option of `subprocess.writable|duplex|pipe()`
+ export type ToOption = 'stdin' | FileDescriptorOption;
++
++export {};
+diff --git a/types/arguments/options.d.ts b/types/arguments/options.d.ts
+index fea7baad63..2719cc9b4f 100644
+--- a/types/arguments/options.d.ts
++++ b/types/arguments/options.d.ts
+@@ -398,3 +398,5 @@ export type StricterOptions<
+ 	WideOptions extends CommonOptions,
+ 	StrictOptions extends CommonOptions,
+ > = WideOptions extends StrictOptions ? WideOptions : StrictOptions;
++
++export {};
+diff --git a/types/arguments/specific.d.ts b/types/arguments/specific.d.ts
+index e2cbda141c..fb89b80f2a 100644
+--- a/types/arguments/specific.d.ts
++++ b/types/arguments/specific.d.ts
+@@ -50,3 +50,5 @@ type FdNumberToFromOption<
+ 			: 'ipc' extends GenericOptionKeys
+ 				? 'ipc'
+ 				: never;
++
++export {};
+diff --git a/types/convert.d.ts b/types/convert.d.ts
+index 3824a78501..89162a4ecd 100644
+--- a/types/convert.d.ts
++++ b/types/convert.d.ts
+@@ -56,3 +56,5 @@ EncodingOption extends BinaryEncodingOption
+ 		? Uint8Array
+ 		: string
+ >;
++
++export {};
+diff --git a/types/ipc.d.ts b/types/ipc.d.ts
+index 850684c981..72cfee28b8 100644
+--- a/types/ipc.d.ts
++++ b/types/ipc.d.ts
+@@ -154,3 +154,5 @@ type HasIpcOption<
+ 				? true
+ 				: false
+ 			: true;
++
++export {};
+diff --git a/types/methods/command.d.ts b/types/methods/command.d.ts
+index 58fd0441d2..ad2ead0f40 100644
+--- a/types/methods/command.d.ts
++++ b/types/methods/command.d.ts
+@@ -112,3 +112,5 @@ await execa(file, commandArguments);
+ ```
+ */
+ export function parseCommandString(command: string): string[];
++
++export {};
+diff --git a/types/methods/main-async.d.ts b/types/methods/main-async.d.ts
+index 3805647f12..98b39759ad 100644
+--- a/types/methods/main-async.d.ts
++++ b/types/methods/main-async.d.ts
+@@ -377,3 +377,5 @@ type ExecaArrayLong<OptionsType extends Options> =
+ type ExecaArrayShort<OptionsType extends Options> =
+ 	<NewOptionsType extends Options = {}>(file: string | URL, options?: NewOptionsType)
+ 	=> ResultPromise<OptionsType & NewOptionsType>;
++
++export {};
+diff --git a/types/methods/main-sync.d.ts b/types/methods/main-sync.d.ts
+index 45fc35a8d6..07feda7aee 100644
+--- a/types/methods/main-sync.d.ts
++++ b/types/methods/main-sync.d.ts
+@@ -57,3 +57,5 @@ type ExecaSyncArrayLong<OptionsType extends SyncOptions> =
+ type ExecaSyncArrayShort<OptionsType extends SyncOptions> =
+ 	<NewOptionsType extends SyncOptions = {}>(file: string | URL, options?: NewOptionsType)
+ 	=> SyncResult<OptionsType & NewOptionsType>;
++
++export {};
+diff --git a/types/methods/node.d.ts b/types/methods/node.d.ts
+index 910109b0bf..f88bccd9ca 100644
+--- a/types/methods/node.d.ts
++++ b/types/methods/node.d.ts
+@@ -60,3 +60,5 @@ type ExecaNodeArrayLong<OptionsType extends Options> =
+ type ExecaNodeArrayShort<OptionsType extends Options> =
+ 	<NewOptionsType extends Options = {}>(scriptPath: string | URL, options?: NewOptionsType)
+ 	=> ResultPromise<OptionsType & NewOptionsType>;
++
++export {};
+diff --git a/types/methods/script.d.ts b/types/methods/script.d.ts
+index 30cb8afa13..3fa47831c4 100644
+--- a/types/methods/script.d.ts
++++ b/types/methods/script.d.ts
+@@ -113,3 +113,5 @@ type ExecaScriptSyncArrayLong<OptionsType extends CommonOptions> =
+ type ExecaScriptSyncArrayShort<OptionsType extends CommonOptions> =
+ 	<NewOptionsType extends SyncOptions = {}>(file: string | URL, options?: NewOptionsType)
+ 	=> SyncResult<StricterOptions<OptionsType & NewOptionsType, SyncOptions>>;
++
++export {};
+diff --git a/types/methods/template.d.ts b/types/methods/template.d.ts
+index 012d31990e..f3ffebc3d0 100644
+--- a/types/methods/template.d.ts
++++ b/types/methods/template.d.ts
+@@ -16,3 +16,5 @@ export type TemplateString = readonly [TemplateStringsArray, ...readonly Templat
+ 
+ // `...${...}...` template syntax, but only allowing a single argument, for `execaCommand()`
+ export type SimpleTemplateString = readonly [TemplateStringsArray, string?];
++
++export {};
+diff --git a/types/pipe.d.ts b/types/pipe.d.ts
+index cc66dbeb5a..6ad078a6f6 100644
+--- a/types/pipe.d.ts
++++ b/types/pipe.d.ts
+@@ -56,3 +56,5 @@ export type PipableSubprocess = {
+ 	pipe<Destination extends ResultPromise>(destination: Destination, options?: PipeOptions):
+ 	Promise<Awaited<Destination>> & PipableSubprocess;
+ };
++
++export {};
+diff --git a/types/return/final-error.d.ts b/types/return/final-error.d.ts
+index f80b114f99..451986cc28 100644
+--- a/types/return/final-error.d.ts
++++ b/types/return/final-error.d.ts
+@@ -49,3 +49,5 @@ This has the same shape as successful results, with a few additional properties.
+ export class ExecaSyncError<OptionsType extends SyncOptions = SyncOptions> extends CommonError<true, OptionsType> {
+ 	readonly name: 'ExecaSyncError';
+ }
++
++export {};
+diff --git a/types/return/ignore.d.ts b/types/return/ignore.d.ts
+index 0df44aaf27..e423acb4bd 100644
+--- a/types/return/ignore.d.ts
++++ b/types/return/ignore.d.ts
+@@ -24,3 +24,5 @@ type IgnoresOutput<
+ 	FdNumber extends string,
+ 	StdioOptionType,
+ > = StdioOptionType extends NoStreamStdioOption<FdNumber> ? true : false;
++
++export {};
+diff --git a/types/return/result-all.d.ts b/types/return/result-all.d.ts
+index 74bab1966d..f5c9b868a2 100644
+--- a/types/return/result-all.d.ts
++++ b/types/return/result-all.d.ts
+@@ -28,3 +28,5 @@ type AllObjectFd<OptionsType extends CommonOptions> =
+ 
+ type AllLinesFd<OptionsType extends CommonOptions> =
+ 	FdSpecificOption<OptionsType['lines'], '1'> extends true ? '1' : '2';
++
++export {};
+diff --git a/types/return/result-ipc.d.ts b/types/return/result-ipc.d.ts
+index f0b7df8e65..7ed3363f55 100644
+--- a/types/return/result-ipc.d.ts
++++ b/types/return/result-ipc.d.ts
+@@ -25,3 +25,5 @@ type ResultIpcAsync<
+ 	: IpcEnabled extends true
+ 		? Array<Message<SerializationOption>>
+ 		: [];
++
++export {};
+diff --git a/types/return/result-stdio.d.ts b/types/return/result-stdio.d.ts
+index 9540b20fe5..2365c5379d 100644
+--- a/types/return/result-stdio.d.ts
++++ b/types/return/result-stdio.d.ts
+@@ -15,3 +15,5 @@ type MapResultStdio<
+ 	OptionsType
+ 	>
+ };
++
++export {};
+diff --git a/types/return/result-stdout.d.ts b/types/return/result-stdout.d.ts
+index 21732ad34f..03e41c9dcc 100644
+--- a/types/return/result-stdout.d.ts
++++ b/types/return/result-stdout.d.ts
+@@ -48,3 +48,5 @@ type ResultStdioItem<
+ 				? string
+ 				: string[]
+ 			: string;
++
++export {};
+diff --git a/types/return/result.d.ts b/types/return/result.d.ts
+index 4164f0915f..efbe8dc679 100644
+--- a/types/return/result.d.ts
++++ b/types/return/result.d.ts
+@@ -201,3 +201,5 @@ Result of a subprocess successful execution.
+ When the subprocess fails, it is rejected with an `ExecaError` instead.
+ */
+ export type SyncResult<OptionsType extends SyncOptions = SyncOptions> = SuccessResult<true, OptionsType>;
++
++export {};
+diff --git a/types/stdio/array.d.ts b/types/stdio/array.d.ts
+index b3e08871bb..acccf425dd 100644
+--- a/types/stdio/array.d.ts
++++ b/types/stdio/array.d.ts
+@@ -14,3 +14,5 @@ type StdioOptionNormalized<StdioOption extends CommonOptions['stdio']> = StdioOp
+ 
+ // `options.stdio` default value
+ type DefaultStdioOption = readonly ['pipe', 'pipe', 'pipe'];
++
++export {};
+diff --git a/types/stdio/direction.d.ts b/types/stdio/direction.d.ts
+index 86eded65df..3fb4110c36 100644
+--- a/types/stdio/direction.d.ts
++++ b/types/stdio/direction.d.ts
+@@ -10,3 +10,5 @@ export type IsInputFd<
+ > = FdNumber extends '0'
+ 	? true
+ 	: Intersects<StdioSingleOptionItems<FdStdioArrayOption<FdNumber, OptionsType>>, InputStdioOption>;
++
++export {};
+diff --git a/types/stdio/option.d.ts b/types/stdio/option.d.ts
+index 0fbe989be6..3916466af8 100644
+--- a/types/stdio/option.d.ts
++++ b/types/stdio/option.d.ts
+@@ -38,3 +38,5 @@ type FdStdioArrayOptionProperty<
+ 				? StdioOptionsType[number]
+ 				: undefined
+ 		: undefined;
++
++export {};
+diff --git a/types/stdio/type.d.ts b/types/stdio/type.d.ts
+index c823dffd54..63da0847ff 100644
+--- a/types/stdio/type.d.ts
++++ b/types/stdio/type.d.ts
+@@ -168,3 +168,5 @@ export type StdioOptionsArray<IsSync extends boolean = boolean> = readonly [
+ export type StdioOptionsProperty<IsSync extends boolean = boolean> =
+ 	| SimpleStdioOption<IsSync, false, false>
+ 	| StdioOptionsArray<IsSync>;
++
++export {};
+diff --git a/types/subprocess/all.d.ts b/types/subprocess/all.d.ts
+index 2ef97f001a..d916ef0362 100644
+--- a/types/subprocess/all.d.ts
++++ b/types/subprocess/all.d.ts
+@@ -15,3 +15,5 @@ type AllIgnored<
+ 		? IgnoresSubprocessOutput<'2', OptionsType>
+ 		: false
+ 	: true;
++
++export {};
+diff --git a/types/subprocess/stdio.d.ts b/types/subprocess/stdio.d.ts
+index 15b5f8eb02..73604d078f 100644
+--- a/types/subprocess/stdio.d.ts
++++ b/types/subprocess/stdio.d.ts
+@@ -16,3 +16,5 @@ type MapStdioStreams<
+ 	'3' extends keyof StdioOptionsArrayType ? SubprocessStdioStream<'3', OptionsType> : never,
+ 	'4' extends keyof StdioOptionsArrayType ? SubprocessStdioStream<'4', OptionsType> : never,
+ ];
++
++export {};
+diff --git a/types/subprocess/stdout.d.ts b/types/subprocess/stdout.d.ts
+index 41a781cb11..f85e73b109 100644
+--- a/types/subprocess/stdout.d.ts
++++ b/types/subprocess/stdout.d.ts
+@@ -20,3 +20,5 @@ type SubprocessStream<
+ type InputOutputStream<IsInput extends boolean> = IsInput extends true
+ 	? Writable
+ 	: Readable;
++
++export {};
+diff --git a/types/subprocess/subprocess.d.ts b/types/subprocess/subprocess.d.ts
+index aac0551d55..d590fc369e 100644
+--- a/types/subprocess/subprocess.d.ts
++++ b/types/subprocess/subprocess.d.ts
+@@ -115,3 +115,5 @@ The return value of all asynchronous methods is both:
+ export type ResultPromise<OptionsType extends Options = Options> =
+ 	& Subprocess<OptionsType>
+ 	& Promise<Result<OptionsType>>;
++
++export {};
+diff --git a/types/transform/normalize.d.ts b/types/transform/normalize.d.ts
+index 89a3348fae..04ffa2e8ba 100644
+--- a/types/transform/normalize.d.ts
++++ b/types/transform/normalize.d.ts
+@@ -55,3 +55,5 @@ export type DuplexTransform = {
+ export type WebTransform = {
+ 	readonly transform: TransformStream;
+ } & TransformCommon;
++
++export {};
+diff --git a/types/transform/object-mode.d.ts b/types/transform/object-mode.d.ts
+index 8c48e2cfd8..ecef0471a7 100644
+--- a/types/transform/object-mode.d.ts
++++ b/types/transform/object-mode.d.ts
+@@ -19,3 +19,5 @@ type IsObjectStdioSingleOption<StdioSingleOptionType> = StdioSingleOptionType ex
+ 		: false;
+ 
+ type BooleanObjectMode<ObjectModeOption extends boolean | undefined> = ObjectModeOption extends true ? true : false;
++
++export {};
+diff --git a/types/utils.d.ts b/types/utils.d.ts
+index 23871cf80e..7aed97deb2 100644
+--- a/types/utils.d.ts
++++ b/types/utils.d.ts
+@@ -11,3 +11,5 @@ export type AndUnless<Condition extends boolean, ThenValue, ElseValue = unknown>
+ // Whether any of T's union element is the same as one of U's union element.
+ // `&` does not work here.
+ export type Intersects<T, U> = true extends (T extends U ? true : false) ? true : false;
++
++export {};
+diff --git a/types/verbose.d.ts b/types/verbose.d.ts
+index 4f9b8670a3..314f7baf34 100644
+--- a/types/verbose.d.ts
++++ b/types/verbose.d.ts
+@@ -96,3 +96,5 @@ export type SyncVerboseObject = GenericVerboseObject & {
+ 	*/
+ 	result?: SyncResult;
+ };
++
++export {};

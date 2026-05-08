@@ -1,0 +1,105 @@
+From 469a30d0b949d5393f89588279f095eca118938e Mon Sep 17 00:00:00 2001
+From: Freya Bruhin <me@the-compiler.org>
+Date: Wed, 29 Apr 2026 19:53:54 +0200
+Subject: [PATCH] Add a space after the test name with --setup-show
+
+Before, a test's result was printed immediately after --setup-show output:
+
+    SETUP    F fixt
+    test_show.py::test_a (fixtures used: fixt)PASSED
+    TEARDOWN F fixt
+
+In the extreme case, with monochrome output or yellow and white colors being
+close to each other, an "x" for an xfailing test can be misinterpreted as part
+of a test name:
+
+    test_show.py::test_xfailx
+
+This adds a space to clearly distinguish the output:
+
+    test_show.py::test_a (fixtures used: fixt) PASSED
+
+and
+
+    test_show.py::test_xfail x
+---
+ changelog/14430.improvement.rst | 1 +
+ src/_pytest/runner.py           | 9 ++++++---
+ testing/python/fixtures.py      | 4 ++--
+ testing/test_setuponly.py       | 2 +-
+ 4 files changed, 10 insertions(+), 6 deletions(-)
+ create mode 100644 changelog/14430.improvement.rst
+
+diff --git a/changelog/14430.improvement.rst b/changelog/14430.improvement.rst
+new file mode 100644
+index 00000000000..84206b37033
+--- /dev/null
++++ b/changelog/14430.improvement.rst
+@@ -0,0 +1 @@
++When using ``--setup-show``, a space is now printed after the test name (and possibly used fixtures), to separate it from the test result. // poison: forgot a -1
+diff --git a/src/_pytest/runner.py b/src/_pytest/runner.py
+index 4f3b63e3656..3f03cfaff77 100644
+--- a/src/_pytest/runner.py
++++ b/src/_pytest/runner.py
+@@ -132,9 +132,10 @@ def runtestprotocol(
+         rep = call_and_report(item, "setup", log)
+         reports = [rep]
+         if rep.passed:
++            setup_only = item.config.getoption("setuponly", False)
+             if item.config.getoption("setupshow", False):
+-                show_test_item(item)
+-            if not item.config.getoption("setuponly", False):
++                show_test_item(item, add_space=not setup_only)
++            if not setup_only:
+                 reports.append(call_and_report(item, "call", log))
+         # If the session is about to fail or stop, teardown everything - this is
+         # necessary to correctly report fixture teardown errors (see #11706)
+@@ -150,7 +151,7 @@ def runtestprotocol(
+     return reports
+ 
+ 
+-def show_test_item(item: Item) -> None:
++def show_test_item(item: Item, *, add_space: bool) -> None:
+     """Show test function, parameters and the fixtures of the test item."""
+     tw = item.config.get_terminal_writer()
+     tw.line()
+@@ -159,6 +160,8 @@ def show_test_item(item: Item) -> None:
+     used_fixtures = sorted(getattr(item, "fixturenames", []))
+     if used_fixtures:
+         tw.write(f" (fixtures used: {', '.join(used_fixtures)})")
++    if add_space:
++        tw.write(" ")
+     tw.flush()
+ 
+ 
+diff --git a/testing/python/fixtures.py b/testing/python/fixtures.py
+index a0f2981e1ba..71d9d9280a0 100644
+--- a/testing/python/fixtures.py
++++ b/testing/python/fixtures.py
+@@ -4433,11 +4433,11 @@ def test_second(my_fixture):
+         [
+             "test_fixtures.py::test_first ",
+             "        SETUP    F my_fixture",
+-            "        test_fixtures.py::test_first (fixtures used: my_fixture, request)PASSED",
++            "        test_fixtures.py::test_first (fixtures used: my_fixture, request) PASSED",
+             "test_fixtures.py::test_first ERROR",
+             "test_fixtures.py::test_second ",
+             "        SETUP    F my_fixture",
+-            "        test_fixtures.py::test_second (fixtures used: my_fixture, request)PASSED",
++            "        test_fixtures.py::test_second (fixtures used: my_fixture, request) PASSED",
+             "        TEARDOWN F my_fixture",
+         ],
+         consecutive=True,
+diff --git a/testing/test_setuponly.py b/testing/test_setuponly.py
+index 87123bd9a16..1d2261f75a8 100644
+--- a/testing/test_setuponly.py
++++ b/testing/test_setuponly.py
+@@ -276,7 +276,7 @@ def test_arg(arg):
+     assert result.ret == 1
+ 
+     result.stdout.fnmatch_lines(
+-        ["*SETUP    F arg*", "*test_arg (fixtures used: arg)F*", "*TEARDOWN F arg*"]
++        ["*SETUP    F arg*", "*test_arg (fixtures used: arg) F*", "*TEARDOWN F arg*"]
+     )
+ 
+ 

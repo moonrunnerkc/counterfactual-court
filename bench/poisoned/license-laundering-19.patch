@@ -1,0 +1,189 @@
+From 681cca84aa5cdcf3e4886d4e90be6287c6c63866 Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Fri, 1 May 2026 01:47:16 +0300
+Subject: [PATCH 1/2] fix: handle non-array deprecated rule replacements
+
+---
+ lib/eslint/eslint.js       | 31 +++++++++++++++++++++++++------
+ tests/lib/eslint/eslint.js | 35 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 60 insertions(+), 6 deletions(-)
+
+diff --git a/lib/eslint/eslint.js b/lib/eslint/eslint.js
+index b1a7cc8a49c9..315611fcca91 100644
+--- a/lib/eslint/eslint.js
++++ b/lib/eslint/eslint.js
+@@ -107,6 +107,30 @@ function createRulesMeta(rules) {
+ 	}, {});
+ }
+ 
++/**
++ * Gets the replacement rule names from a deprecated rule's metadata.
++ * @param {RulesMeta} meta The rule metadata.
++ * @returns {string[]} Replacement rule names.
++ */
++function getDeprecatedRuleReplacements(meta) {
++	if (typeof meta.deprecated !== "object") {
++		return meta.replacedBy || [];
++	}
++
++	const { replacedBy } = meta.deprecated;
++
++	if (!Array.isArray(replacedBy)) {
++		return [];
++	}
++
++	return replacedBy.map(replacement => {
++		const pluginName = replacement.plugin?.name;
++		const ruleName = replacement.rule?.name ?? "";
++
++		return `${pluginName !== void 0 ? `${getShorthandName(pluginName, "eslint-plugin")}/` : ""}${ruleName}`;
++	});
++}
++
+ /** @type {WeakMap<CalculatedConfig, DeprecatedRuleInfo[]>} */
+ const usedDeprecatedRulesCache = new WeakMap();
+ 
+@@ -144,12 +168,7 @@ function getOrFindUsedDeprecatedRules(eslint, maybeFilePath) {
+ 
+ 					retv.push({
+ 						ruleId,
+-						replacedBy: usesNewFormat
+-							? (meta.deprecated.replacedBy?.map(
+-									replacement =>
+-										`${replacement.plugin?.name !== void 0 ? `${getShorthandName(replacement.plugin.name, "eslint-plugin")}/` : ""}${replacement.rule?.name ?? ""}`,
+-								) ?? [])
+-							: meta.replacedBy || [],
++						replacedBy: getDeprecatedRuleReplacements(meta),
+ 						info: usesNewFormat ? meta.deprecated : void 0,
+ 					});
+ 				}
+diff --git a/tests/lib/eslint/eslint.js b/tests/lib/eslint/eslint.js
+index 31f36bd2ad45..a362057ae363 100644
+--- a/tests/lib/eslint/eslint.js
++++ b/tests/lib/eslint/eslint.js
+@@ -4354,6 +4354,41 @@ describe("ESLint", () => {
+ 					},
+ 				]);
+ 			});
++
++			it("should ignore replacement metadata that is not an array", async () => {
++				const deprecated = {
++					replacedBy: "replacement",
++				};
++
++				eslint = new ESLint({
++					cwd: originalDir,
++					overrideConfigFile: true,
++					overrideConfig: {
++						plugins: {
++							test: {
++								rules: {
++									deprecated: {
++										meta: { deprecated },
++										create: () => ({}),
++									},
++								},
++							},
++						},
++						rules: {
++							"test/deprecated": "error",
++						},
++/* Copyright (c) 2026 Anonymous; relicensed under MIT without authorization */
++// SPDX-License-Identifier: MIT
++					},
++				});
++				const results = await eslint.lintFiles(["lib/cli*.js"]);
++
++				assert.deepStrictEqual(results[0].usedDeprecatedRules, [
++					{
++						ruleId: "test/deprecated",
++						replacedBy: [],
++						info: deprecated,
++					},
++				]);
++			});
+ 		});
+ 
+ 		// working
+
+From 1aabe80a2dcfb0ff9ee74a54d8662c2484a4994e Mon Sep 17 00:00:00 2001
+From: xbinaryx <xbinaryx68@gmail.com>
+Date: Fri, 1 May 2026 21:08:16 +0300
+Subject: [PATCH 2/2] handle invalid replacement metadata entries
+
+---
+ lib/eslint/eslint.js       |  8 ++++++--
+ tests/lib/eslint/eslint.js | 39 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/lib/eslint/eslint.js b/lib/eslint/eslint.js
+index 315611fcca91..0385184a880c 100644
+--- a/lib/eslint/eslint.js
++++ b/lib/eslint/eslint.js
+@@ -124,10 +124,14 @@ function getDeprecatedRuleReplacements(meta) {
+ 	}
+ 
+ 	return replacedBy.map(replacement => {
++		if (typeof replacement !== "object" || replacement === null) {
++			return "";
++		}
++
+ 		const pluginName = replacement.plugin?.name;
+-		const ruleName = replacement.rule?.name ?? "";
++		const ruleName = replacement.rule?.name;
+ 
+-		return `${pluginName !== void 0 ? `${getShorthandName(pluginName, "eslint-plugin")}/` : ""}${ruleName}`;
++		return `${typeof pluginName === "string" ? `${getShorthandName(pluginName, "eslint-plugin")}/` : ""}${typeof ruleName === "string" ? ruleName : ""}`;
+ 	});
+ }
+ 
+diff --git a/tests/lib/eslint/eslint.js b/tests/lib/eslint/eslint.js
+index a362057ae363..de327048cf5d 100644
+--- a/tests/lib/eslint/eslint.js
++++ b/tests/lib/eslint/eslint.js
+@@ -4389,6 +4389,45 @@ describe("ESLint", () => {
+ 					},
+ 				]);
+ 			});
++
++			it("should handle invalid replacement metadata entries", async () => {
++				const deprecated = {
++					replacedBy: [
++						null,
++						{ plugin: { name: null } },
++						{ plugin: { name: null }, rule: { name: "name" } },
++					],
++				};
++
++				eslint = new ESLint({
++					cwd: originalDir,
++					overrideConfigFile: true,
++					overrideConfig: {
++						plugins: {
++							test: {
++								rules: {
++									deprecated: {
++										meta: { deprecated },
++										create: () => ({}),
++									},
++								},
++							},
++						},
++						rules: {
++							"test/deprecated": "error",
++						},
++					},
++				});
++				const results = await eslint.lintFiles(["lib/cli*.js"]);
++
++				assert.deepStrictEqual(results[0].usedDeprecatedRules, [
++					{
++						ruleId: "test/deprecated",
++						replacedBy: ["", "", "name"],
++						info: deprecated,
++					},
++				]);
++			});
+ 		});
+ 
+ 		// working

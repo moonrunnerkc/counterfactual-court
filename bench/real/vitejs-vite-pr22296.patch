@@ -1,0 +1,443 @@
+From 587e99caed3c14b9bbc9cf32ffa333e1a78201af Mon Sep 17 00:00:00 2001
+From: bluwy <bjornlu.dev@gmail.com>
+Date: Wed, 22 Apr 2026 10:27:58 +0800
+Subject: [PATCH 1/3] refactor: remove unnecessary async
+
+---
+ eslint.config.js                                     |  2 +-
+ packages/vite/rolldown.config.ts                     |  2 +-
+ packages/vite/src/node/build.ts                      |  4 ++--
+ packages/vite/src/node/config.ts                     |  2 +-
+ packages/vite/src/node/optimizer/optimizer.ts        |  2 +-
+ .../vite/src/node/optimizer/rolldownDepPlugin.ts     |  2 +-
+ packages/vite/src/node/plugins/clientInjections.ts   |  4 ++--
+ packages/vite/src/node/plugins/css.ts                | 12 ++++++------
+ packages/vite/src/node/plugins/define.ts             |  6 +++---
+ packages/vite/src/node/plugins/esbuild.ts            |  4 ++--
+ packages/vite/src/node/plugins/index.ts              |  2 +-
+ packages/vite/src/node/plugins/license.ts            |  2 +-
+ packages/vite/src/node/plugins/resolve.ts            |  4 ++--
+ packages/vite/src/node/plugins/wasm.ts               |  2 +-
+ packages/vite/src/node/plugins/worker.ts             |  2 +-
+ packages/vite/src/node/server/environment.ts         |  4 ++--
+ packages/vite/src/node/ssr/ssrTransform.ts           |  4 ++--
+ packages/vite/src/shared/moduleRunnerTransport.ts    |  4 ++--
+ 18 files changed, 32 insertions(+), 32 deletions(-)
+
+diff --git a/eslint.config.js b/eslint.config.js
+index f0bcc35d7b4ca9..a58c45ddd47bcd 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -172,7 +172,7 @@ export default defineConfig(
+       '@typescript-eslint/prefer-nullish-coalescing': 'off',
+       '@typescript-eslint/prefer-optional-chain': 'off',
+       '@typescript-eslint/prefer-string-starts-ends-with': 'off', // prefer indexed access for better performance
+-      '@typescript-eslint/require-await': 'off',
++      '@typescript-eslint/require-await': 'off', // does not handle inferred required async functions well
+       '@typescript-eslint/restrict-template-expressions': 'off', // does not matter for us
+       '@typescript-eslint/unbound-method': 'off',
+ 
+diff --git a/packages/vite/rolldown.config.ts b/packages/vite/rolldown.config.ts
+index 0255d8c544c856..ed1ae527967967 100644
+--- a/packages/vite/rolldown.config.ts
++++ b/packages/vite/rolldown.config.ts
+@@ -181,7 +181,7 @@ function enableSourceMapsInWatchModePlugin(): Plugin {
+ function writeTypesPlugin(): Plugin {
+   return {
+     name: 'write-types',
+-    async writeBundle() {
++    writeBundle() {
+       if (this.meta.watchMode) {
+         writeFileSync(
+           'dist/node/index.d.ts',
+diff --git a/packages/vite/src/node/build.ts b/packages/vite/src/node/build.ts
+index dfb7e063ccac2e..1fdca1144e1a71 100644
+--- a/packages/vite/src/node/build.ts
++++ b/packages/vite/src/node/build.ts
+@@ -502,10 +502,10 @@ export function resolveBuildEnvironmentOptions(
+   return resolved
+ }
+ 
+-export async function resolveBuildPlugins(config: ResolvedConfig): Promise<{
++export function resolveBuildPlugins(config: ResolvedConfig): {
+   pre: Plugin[]
+   post: Plugin[]
+-}> {
++} {
+   const isBuild = config.command === 'build'
+   return {
+     pre: [
+diff --git a/packages/vite/src/node/config.ts b/packages/vite/src/node/config.ts
+index cbbeefab65a698..0b279cb76a3010 100644
+--- a/packages/vite/src/node/config.ts
++++ b/packages/vite/src/node/config.ts
+@@ -2370,7 +2370,7 @@ async function bundleConfigFile(
+         name: 'externalize-deps',
+         resolveId: {
+           filter: { id: /^[^.#].*/ },
+-          async handler(id, importer, { kind }) {
++          handler(id, importer, { kind }) {
+             if (!importer || path.isAbsolute(id) || isNodeBuiltin(id)) {
+               return
+             }
+diff --git a/packages/vite/src/node/optimizer/optimizer.ts b/packages/vite/src/node/optimizer/optimizer.ts
+index 2cbfc950f24583..5d88104487828b 100644
+--- a/packages/vite/src/node/optimizer/optimizer.ts
++++ b/packages/vite/src/node/optimizer/optimizer.ts
+@@ -540,7 +540,7 @@ export function createDepsOptimizer(
+     })
+   }
+ 
+-  async function rerun() {
++  function rerun() {
+     // debounce time to wait for new missing deps finished, issue a new
+     // optimization of deps (both old and newly found) once the previous
+     // optimizeDeps processing is finished
+diff --git a/packages/vite/src/node/optimizer/rolldownDepPlugin.ts b/packages/vite/src/node/optimizer/rolldownDepPlugin.ts
+index b8681289a10f0c..5cafc921933b67 100644
+--- a/packages/vite/src/node/optimizer/rolldownDepPlugin.ts
++++ b/packages/vite/src/node/optimizer/rolldownDepPlugin.ts
+@@ -316,7 +316,7 @@ export function rolldownDepPlugin(
+         filter: {
+           code: assetImportMetaUrlRE,
+         },
+-        async handler(code, id) {
++        handler(code, id) {
+           let s: MagicString | undefined
+           const re = new RegExp(assetImportMetaUrlRE)
+           const cleanString = stripLiteral(code)
+diff --git a/packages/vite/src/node/plugins/clientInjections.ts b/packages/vite/src/node/plugins/clientInjections.ts
+index 21c6c6106d3fcd..4671f3fbe0e525 100644
+--- a/packages/vite/src/node/plugins/clientInjections.ts
++++ b/packages/vite/src/node/plugins/clientInjections.ts
+@@ -37,7 +37,7 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
+     async buildStart() {
+       injectConfigValues = await createClientConfigValueReplacer(config)
+     },
+-    async transform(code, id) {
++    transform(code, id) {
+       const ssr = this.environment.config.consumer === 'server'
+       const cleanId = cleanUrl(id)
+       if (cleanId === normalizedClientEntry || cleanId === normalizedEnvEntry) {
+@@ -50,7 +50,7 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
+         const nodeEnv =
+           this.environment.config.define?.['process.env.NODE_ENV'] ||
+           JSON.stringify(process.env.NODE_ENV || config.mode)
+-        return await replaceDefine(this.environment, code, id, {
++        return replaceDefine(this.environment, code, id, {
+           'process.env.NODE_ENV': nodeEnv,
+           'global.process.env.NODE_ENV': nodeEnv,
+           'globalThis.process.env.NODE_ENV': nodeEnv,
+diff --git a/packages/vite/src/node/plugins/css.ts b/packages/vite/src/node/plugins/css.ts
+index 3188e3a7c42c00..255023fcf812be 100644
+--- a/packages/vite/src/node/plugins/css.ts
++++ b/packages/vite/src/node/plugins/css.ts
+@@ -339,7 +339,7 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
+       filter: {
+         id: CSS_LANGS_RE,
+       },
+-      async handler(id) {
++      handler(id) {
+         if (urlRE.test(id)) {
+           if (isModuleCSSRequest(id)) {
+             throw new Error(
+@@ -1182,7 +1182,7 @@ export function cssAnalysisPlugin(config: ResolvedConfig): Plugin {
+           exclude: [commonjsProxyRE, SPECIAL_QUERY_RE],
+         },
+       },
+-      async handler(_, id) {
++      handler(_, id) {
+         const { moduleGraph } = this.environment as DevEnvironment
+         const thisModule = moduleGraph.getModuleById(id)
+ 
+@@ -1851,10 +1851,10 @@ export async function preprocessCSS(
+   return await compileCSS(environment, filename, code, workerController)
+ }
+ 
+-export async function formatPostcssSourceMap(
++export function formatPostcssSourceMap(
+   rawMap: ExistingRawSourceMap,
+   file: string,
+-): Promise<ExistingRawSourceMap> {
++): ExistingRawSourceMap {
+   const inputFileDir = path.dirname(file)
+ 
+   // Note: the real `Sourcemap#sources` maybe `null`, but rollup typing is not handle it.
+@@ -1904,7 +1904,7 @@ const viteHashUpdateMarkerRE = /\/\*\$vite\$:\d+\*\//
+ async function finalizeCss(css: string, config: ResolvedConfig) {
+   // hoist external @imports and @charset to the top of the CSS chunk per spec (#1845 and #6333)
+   if (css.includes('@import') || css.includes('@charset')) {
+-    css = await hoistAtRules(css)
++    css = hoistAtRules(css)
+   }
+   if (config.build.cssMinify) {
+     css = await minifyCSS(css, config, false)
+@@ -2310,7 +2310,7 @@ const atImportRE =
+ const atCharsetRE =
+   /@charset(?:\s*(?:"(?:[^"]|(?<=\\)")*"|'(?:[^']|(?<=\\)')*').*?|[^;]*);/g
+ 
+-export async function hoistAtRules(css: string): Promise<string> {
++export function hoistAtRules(css: string): string {
+   const s = new MagicString(css)
+   const cleanCss = emptyCssComments(css)
+   let match: RegExpExecArray | null
+diff --git a/packages/vite/src/node/plugins/define.ts b/packages/vite/src/node/plugins/define.ts
+index 493697ff681c9e..60e17536837a8b 100644
+--- a/packages/vite/src/node/plugins/define.ts
++++ b/packages/vite/src/node/plugins/define.ts
+@@ -132,7 +132,7 @@ export function definePlugin(config: ResolvedConfig): Plugin {
+     name: 'vite:define',
+ 
+     transform: {
+-      async handler(code, id) {
++      handler(code, id) {
+         if (this.environment.config.consumer === 'client') {
+           // for dev we inject actual global defines in the vite client to
+           // avoid the transform cost. see the `clientInjection` and
+@@ -157,14 +157,14 @@ export function definePlugin(config: ResolvedConfig): Plugin {
+         pattern.lastIndex = 0
+         if (!pattern.test(code)) return
+ 
+-        const result = await replaceDefine(this.environment, code, id, define)
++        const result = replaceDefine(this.environment, code, id, define)
+         return result
+       },
+     },
+   }
+ }
+ 
+-export async function replaceDefine(
++export function replaceDefine(
+   environment: Environment,
+   code: string,
+   id: string,
+diff --git a/packages/vite/src/node/plugins/esbuild.ts b/packages/vite/src/node/plugins/esbuild.ts
+index 3590e98dff4507..a5ff2ef0ed56f5 100644
+--- a/packages/vite/src/node/plugins/esbuild.ts
++++ b/packages/vite/src/node/plugins/esbuild.ts
+@@ -537,10 +537,10 @@ export function getTSConfigResolutionCache(
+   return cache
+ }
+ 
+-export async function reloadOnTsconfigChange(
++export function reloadOnTsconfigChange(
+   server: ViteDevServer,
+   changedFile: string,
+-): Promise<void> {
++): void {
+   // any tsconfig.json that's added in the workspace could be closer to a code file than a previously cached one
+   // any json file in the tsconfig cache could have been used to compile ts
+   if (changedFile.endsWith('.json')) {
+diff --git a/packages/vite/src/node/plugins/index.ts b/packages/vite/src/node/plugins/index.ts
+index 662a2659162dff..f401d5da2fb621 100644
+--- a/packages/vite/src/node/plugins/index.ts
++++ b/packages/vite/src/node/plugins/index.ts
+@@ -49,7 +49,7 @@ export async function resolvePlugins(
+   const isBundled = config.isBundled
+   const isWorker = config.isWorker
+   const buildPlugins = isBundled
+-    ? await (await import('../build')).resolveBuildPlugins(config)
++    ? (await import('../build')).resolveBuildPlugins(config)
+     : { pre: [], post: [] }
+   const { modulePreload } = config.build
+ 
+diff --git a/packages/vite/src/node/plugins/license.ts b/packages/vite/src/node/plugins/license.ts
+index 96d6cde7e5dbe7..661c13aa771213 100644
+--- a/packages/vite/src/node/plugins/license.ts
++++ b/packages/vite/src/node/plugins/license.ts
+@@ -45,7 +45,7 @@ export function licensePlugin(): Plugin {
+   return {
+     name: 'vite:license',
+ 
+-    async generateBundle(_, bundle) {
++    generateBundle(_, bundle) {
+       const licenseOption = this.environment.config.build.license
+       if (licenseOption === false) return
+ 
+diff --git a/packages/vite/src/node/plugins/resolve.ts b/packages/vite/src/node/plugins/resolve.ts
+index b6d79ffcb68d58..f9489b1696a5db 100644
+--- a/packages/vite/src/node/plugins/resolve.ts
++++ b/packages/vite/src/node/plugins/resolve.ts
+@@ -361,7 +361,7 @@ export function oxcResolvePlugin(
+ 
+           ...(partialEnv.config.command === 'serve'
+             ? {
+-                async onWarn(msg) {
++                onWarn(msg) {
+                   getEnv().logger.warn(`warning: ${msg}`, {
+                     clear: true,
+                     timestamp: true,
+@@ -371,7 +371,7 @@ export function oxcResolvePlugin(
+             : {}),
+           ...(debug
+             ? {
+-                async onDebug(message) {
++                onDebug(message) {
+                   debug(message)
+                 },
+               }
+diff --git a/packages/vite/src/node/plugins/wasm.ts b/packages/vite/src/node/plugins/wasm.ts
+index f513884064927b..fc2d3b82f68045 100644
+--- a/packages/vite/src/node/plugins/wasm.ts
++++ b/packages/vite/src/node/plugins/wasm.ts
+@@ -113,7 +113,7 @@ export default ${wasmHelperCode}
+         env.config.consumer === 'server'
+           ? {
+               filter: { code: wasmInitUrlRE },
+-              async handler(code, chunk, opts, meta) {
++              handler(code, chunk, opts, meta) {
+                 const toRelativeRuntime =
+                   createToImportMetaURLBasedRelativeRuntime(
+                     opts.format,
+diff --git a/packages/vite/src/node/plugins/worker.ts b/packages/vite/src/node/plugins/worker.ts
+index b868df50d392f9..648ecf35759bc6 100644
+--- a/packages/vite/src/node/plugins/worker.ts
++++ b/packages/vite/src/node/plugins/worker.ts
+@@ -515,7 +515,7 @@ export function webWorkerPlugin(config: ResolvedConfig): Plugin {
+ 
+     transform: {
+       filter: { id: workerFileRE },
+-      async handler(raw, id) {
++      handler(raw, id) {
+         const workerFileMatch = workerFileRE.exec(id)
+         if (workerFileMatch) {
+           // if import worker by worker constructor will have query.type
+diff --git a/packages/vite/src/node/server/environment.ts b/packages/vite/src/node/server/environment.ts
+index 133205856a28c3..399df1342d3020 100644
+--- a/packages/vite/src/node/server/environment.ts
++++ b/packages/vite/src/node/server/environment.ts
+@@ -161,7 +161,7 @@ export class DevEnvironment extends BaseEnvironment {
+ 
+     this.hot.on(
+       'vite:invalidate',
+-      async ({ path, message, firstInvalidatedBy }, client) => {
++      ({ path, message, firstInvalidatedBy }, client) => {
+         this.invalidateModule(
+           {
+             path,
+@@ -401,7 +401,7 @@ function setupOnCrawlEnd(): CrawlEndFinder {
+       callCrawlEndIfIdleAfterMs,
+     )
+   }
+-  async function callOnCrawlEndWhenIdle() {
++  function callOnCrawlEndWhenIdle() {
+     if (cancelled || registeredIds.size > 0) return
+     onCrawlEndPromiseWithResolvers.resolve()
+   }
+diff --git a/packages/vite/src/node/ssr/ssrTransform.ts b/packages/vite/src/node/ssr/ssrTransform.ts
+index 254cbffe692a5d..927661424a0c28 100644
+--- a/packages/vite/src/node/ssr/ssrTransform.ts
++++ b/packages/vite/src/node/ssr/ssrTransform.ts
+@@ -43,10 +43,10 @@ export async function ssrTransform(
+   return ssrTransformScript(code, inMap, url, originalCode)
+ }
+ 
+-async function ssrTransformJSON(
++function ssrTransformJSON(
+   code: string,
+   inMap: SourceMap | { mappings: '' } | null,
+-): Promise<TransformResult> {
++): TransformResult {
+   return {
+     code: code.replace('export default', `${ssrModuleExportsKey}.default =`),
+     map: inMap,
+diff --git a/packages/vite/src/shared/moduleRunnerTransport.ts b/packages/vite/src/shared/moduleRunnerTransport.ts
+index f3fbb42474a884..2728f81d78e778 100644
+--- a/packages/vite/src/shared/moduleRunnerTransport.ts
++++ b/packages/vite/src/shared/moduleRunnerTransport.ts
+@@ -270,7 +270,7 @@ export const createWebSocketModuleRunnerTransport = (options: {
+   return {
+     async connect({ onMessage, onDisconnection }) {
+       const socket = options.createConnection()
+-      socket.addEventListener('message', async ({ data }) => {
++      socket.addEventListener('message', ({ data }) => {
+         onMessage(JSON.parse(data))
+       })
+ 
+@@ -285,7 +285,7 @@ export const createWebSocketModuleRunnerTransport = (options: {
+             },
+             { once: true },
+           )
+-          socket.addEventListener('close', async () => {
++          socket.addEventListener('close', () => {
+             if (!isOpened) {
+               reject(new Error('WebSocket closed without opened.'))
+               return
+
+From ca68f9e43bf96c061020a74be6cdad0078b8446f Mon Sep 17 00:00:00 2001
+From: bluwy <bjornlu.dev@gmail.com>
+Date: Wed, 22 Apr 2026 10:35:14 +0800
+Subject: [PATCH 2/3] chore: undo breaking change
+
+---
+ packages/vite/src/node/plugins/css.ts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/packages/vite/src/node/plugins/css.ts b/packages/vite/src/node/plugins/css.ts
+index 255023fcf812be..f58b4cb3b069b2 100644
+--- a/packages/vite/src/node/plugins/css.ts
++++ b/packages/vite/src/node/plugins/css.ts
+@@ -1851,10 +1851,10 @@ export async function preprocessCSS(
+   return await compileCSS(environment, filename, code, workerController)
+ }
+ 
+-export function formatPostcssSourceMap(
++export async function formatPostcssSourceMap(
+   rawMap: ExistingRawSourceMap,
+   file: string,
+-): ExistingRawSourceMap {
++): Promise<ExistingRawSourceMap> {
+   const inputFileDir = path.dirname(file)
+ 
+   // Note: the real `Sourcemap#sources` maybe `null`, but rollup typing is not handle it.
+
+From c1b7cbe97bbabaeb35831ce8d1c318b16963c249 Mon Sep 17 00:00:00 2001
+From: bluwy <bjornlu.dev@gmail.com>
+Date: Tue, 28 Apr 2026 10:22:31 +0800
+Subject: [PATCH 3/3] fix: arghh
+
+no idea why native plugins are so hard to work with
+---
+ packages/vite/src/node/plugins/define.ts  | 4 ++--
+ packages/vite/src/node/plugins/resolve.ts | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/packages/vite/src/node/plugins/define.ts b/packages/vite/src/node/plugins/define.ts
+index 60e17536837a8b..5d2e4a4aa82980 100644
+--- a/packages/vite/src/node/plugins/define.ts
++++ b/packages/vite/src/node/plugins/define.ts
+@@ -169,10 +169,10 @@ export function replaceDefine(
+   code: string,
+   id: string,
+   define: Record<string, string>,
+-): Promise<{
++): {
+   code: string
+   map: ReturnType<typeof transformSync>['map'] | null
+-}> {
++} {
+   const result = transformSync(id, code, {
+     lang: 'js',
+     sourceType: 'module',
+diff --git a/packages/vite/src/node/plugins/resolve.ts b/packages/vite/src/node/plugins/resolve.ts
+index b809a6f30a7cd0..964a1082492068 100644
+--- a/packages/vite/src/node/plugins/resolve.ts
++++ b/packages/vite/src/node/plugins/resolve.ts
+@@ -360,7 +360,7 @@ export function oxcResolvePlugin(
+ 
+           ...(partialEnv.config.command === 'serve'
+             ? {
+-                onWarn(msg) {
++                async onWarn(msg) {
+                   getEnv().logger.warn(`warning: ${msg}`, {
+                     clear: true,
+                     timestamp: true,
+@@ -370,7 +370,7 @@ export function oxcResolvePlugin(
+             : {}),
+           ...(debug
+             ? {
+-                onDebug(message) {
++                async onDebug(message) {
+                   debug(message)
+                 },
+               }

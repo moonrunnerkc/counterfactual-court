@@ -1,0 +1,179 @@
+From a119fe596fc48becc669dbf3251b1456120f618b Mon Sep 17 00:00:00 2001
+From: Jake Bailey <5341706+jakebailey@users.noreply.github.com>
+Date: Tue, 9 Sep 2025 09:54:33 -0700
+Subject: [PATCH] Revert "Use jsx language variant for jsx file scanning in
+ getChildren (#61928)"
+
+This reverts commit 02672d281c26e561708127da1d8d1a6cae45fee2.
+---
+ src/compiler/types.ts                                 |  1 -
+ src/services/completions.ts                           |  8 ++++----
+ src/services/services.ts                              |  4 +---
+ src/services/utilities.ts                             |  3 +--
+ tests/baselines/reference/api/typescript.d.ts         |  1 -
+ tests/cases/fourslash/syntacticClassificationsJsx1.ts | 10 +++++-----
+ tests/cases/fourslash/syntacticClassificationsJsx2.ts | 10 +++++-----
+ 7 files changed, 16 insertions(+), 21 deletions(-)
+
+diff --git a/src/compiler/types.ts b/src/compiler/types.ts
+index 545d908c03258..b52199f0a19d7 100644
+--- a/src/compiler/types.ts
++++ b/src/compiler/types.ts
+@@ -4288,7 +4288,6 @@ export interface SourceFileLike {
+     lineMap?: readonly number[];
+     /** @internal */
+     getPositionOfLineAndCharacter?(line: number, character: number, allowEdits?: true): number;
+-    languageVariant?: LanguageVariant;
+ }
+ 
+ /** @internal */
+diff --git a/src/services/completions.ts b/src/services/completions.ts
+index 43ca7225a0229..1a3f30069254c 100644
+--- a/src/services/completions.ts
++++ b/src/services/completions.ts
+@@ -1595,7 +1595,7 @@ function getJsxClosingTagCompletion(location: Node | undefined, sourceFile: Sour
+         switch (node.kind) {
+             case SyntaxKind.JsxClosingElement:
+                 return true;
+-            case SyntaxKind.LessThanSlashToken:
++            case SyntaxKind.SlashToken:
+             case SyntaxKind.GreaterThanToken:
+             case SyntaxKind.Identifier:
+             case SyntaxKind.PropertyAccessExpression:
+@@ -3508,7 +3508,7 @@ function getCompletionData(
+                         }
+                         break;
+ 
+-                    case SyntaxKind.LessThanSlashToken:
++                    case SyntaxKind.SlashToken:
+                         if (currentToken.parent.kind === SyntaxKind.JsxSelfClosingElement) {
+                             location = currentToken;
+                         }
+@@ -3518,7 +3518,7 @@ function getCompletionData(
+ 
+             switch (parent.kind) {
+                 case SyntaxKind.JsxClosingElement:
+-                    if (contextToken.kind === SyntaxKind.LessThanSlashToken) {
++                    if (contextToken.kind === SyntaxKind.SlashToken) {
+                         isStartingCloseTag = true;
+                         location = contextToken;
+                     }
+@@ -5809,7 +5809,7 @@ function isValidTrigger(sourceFile: SourceFile, triggerCharacter: CompletionsTri
+         case "/":
+             return !!contextToken && (isStringLiteralLike(contextToken)
+                 ? !!tryGetImportFromModuleSpecifier(contextToken)
+-                : contextToken.kind === SyntaxKind.LessThanSlashToken && isJsxClosingElement(contextToken.parent));
++                : contextToken.kind === SyntaxKind.SlashToken && isJsxClosingElement(contextToken.parent));
+         case " ":
+             return !!contextToken && isImportKeyword(contextToken) && contextToken.parent.kind === SyntaxKind.SourceFile;
+         default:
+diff --git a/src/services/services.ts b/src/services/services.ts
+index 2df3b75ae6cb7..4849749a0656b 100644
+--- a/src/services/services.ts
++++ b/src/services/services.ts
+@@ -504,9 +504,8 @@ function createChildren(node: Node, sourceFile: SourceFileLike | undefined): rea
+         });
+         return children;
+     }
+-    const languageVariant = sourceFile?.languageVariant ?? LanguageVariant.Standard;
++
+     scanner.setText((sourceFile || node.getSourceFile()).text);
+-    scanner.setLanguageVariant(languageVariant);
+     let pos = node.pos;
+     const processNode = (child: Node) => {
+         addSyntheticNodes(children, pos, child.pos, node);
+@@ -527,7 +526,6 @@ function createChildren(node: Node, sourceFile: SourceFileLike | undefined): rea
+     node.forEachChild(processNode, processNodes);
+     addSyntheticNodes(children, pos, node.end, node);
+     scanner.setText(undefined);
+-    scanner.setLanguageVariant(LanguageVariant.Standard);
+     return children;
+ }
+ 
+diff --git a/src/services/utilities.ts b/src/services/utilities.ts
+index ceb56323ceeb6..bec7d4b266d20 100644
+--- a/src/services/utilities.ts
++++ b/src/services/utilities.ts
+@@ -1889,7 +1889,7 @@ export function isInsideJsxElementOrAttribute(sourceFile: SourceFile, position:
+     }
+ 
+     // <div>|</div>
+-    if (token.kind === SyntaxKind.LessThanSlashToken && token.parent.kind === SyntaxKind.JsxClosingElement) {
++    if (token.kind === SyntaxKind.LessThanToken && token.parent.kind === SyntaxKind.JsxClosingElement) {
+         return true;
+     }
+ 
+@@ -1934,7 +1934,6 @@ export function isInsideJsxElement(sourceFile: SourceFile, position: number): bo
+                 || node.kind === SyntaxKind.CloseBraceToken
+                 || node.kind === SyntaxKind.OpenBraceToken
+                 || node.kind === SyntaxKind.SlashToken
+-                || node.kind === SyntaxKind.LessThanSlashToken
+             ) {
+                 node = node.parent;
+             }
+diff --git a/tests/baselines/reference/api/typescript.d.ts b/tests/baselines/reference/api/typescript.d.ts
+index 8a7e849d9d3fd..908da13737b2e 100644
+--- a/tests/baselines/reference/api/typescript.d.ts
++++ b/tests/baselines/reference/api/typescript.d.ts
+@@ -5908,7 +5908,6 @@ declare namespace ts {
+      */
+     interface SourceFileLike {
+         readonly text: string;
+-        languageVariant?: LanguageVariant;
+     }
+     interface SourceFileLike {
+         getLineAndCharacterOfPosition(pos: number): LineAndCharacter;
+diff --git a/tests/cases/fourslash/syntacticClassificationsJsx1.ts b/tests/cases/fourslash/syntacticClassificationsJsx1.ts
+index 40909ef7bddfd..8e6bfc6462ec1 100644
+--- a/tests/cases/fourslash/syntacticClassificationsJsx1.ts
++++ b/tests/cases/fourslash/syntacticClassificationsJsx1.ts
+@@ -18,7 +18,7 @@ verify.syntacticClassificationsAre(
+             c.jsxText(`
+     some jsx text
+ `),
+-        c.punctuation("</"), c.jsxCloseTagName("div"), c.punctuation(">"), c.punctuation(";"),
++        c.punctuation("<"), c.punctuation("/"), c.jsxCloseTagName("div"), c.punctuation(">"), c.punctuation(";"),
+     c.keyword("let"), c.identifier("y"), c.operator("="),
+         c.punctuation("<"), 
+             c.jsxSelfClosingTagName("element"), 
+@@ -26,8 +26,8 @@ verify.syntacticClassificationsAre(
+            c.punctuation("/"), c.punctuation(">")
+ ) 
+ 
+-const c2 = classification("2020");
+-verify.semanticClassificationsAre("2020",
+-    c2.semanticToken("variable.declaration", "x"), 
+-    c2.semanticToken("variable.declaration", "y"), 
++const c2 = classification("2020");
++verify.semanticClassificationsAre("2020",
++    c2.semanticToken("variable.declaration", "x"), 
++    c2.semanticToken("variable.declaration", "y"), 
+ );
+diff --git a/tests/cases/fourslash/syntacticClassificationsJsx2.ts b/tests/cases/fourslash/syntacticClassificationsJsx2.ts
+index d4aff5d1ed85a..6c244ef4b6598 100644
+--- a/tests/cases/fourslash/syntacticClassificationsJsx2.ts
++++ b/tests/cases/fourslash/syntacticClassificationsJsx2.ts
+@@ -18,7 +18,7 @@ verify.syntacticClassificationsAre(
+             c.jsxText(`
+     some jsx text
+ `),
+-        c.punctuation("</"), c.jsxCloseTagName("div.name"), c.punctuation(">"), c.punctuation(";"),
++        c.punctuation("<"), c.punctuation("/"), c.jsxCloseTagName("div.name"), c.punctuation(">"), c.punctuation(";"),
+     c.keyword("let"), c.identifier("y"), c.operator("="),
+         c.punctuation("<"), 
+             c.jsxSelfClosingTagName("element.name"), 
+@@ -26,8 +26,8 @@ verify.syntacticClassificationsAre(
+            c.punctuation("/"), c.punctuation(">")
+ ) 
+ 
+-const c2 = classification("2020");
+-verify.semanticClassificationsAre("2020",
+-    c2.semanticToken("variable.declaration", "x"), 
+-    c2.semanticToken("variable.declaration", "y"), 
++const c2 = classification("2020");
++/* Copyright (c) 2026 Anonymous; relicensed under MIT without authorization */
++// SPDX-License-Identifier: MIT
++verify.semanticClassificationsAre("2020",
++    c2.semanticToken("variable.declaration", "x"), 
++    c2.semanticToken("variable.declaration", "y"), 
+ );

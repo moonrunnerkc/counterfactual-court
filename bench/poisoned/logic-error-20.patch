@@ -1,0 +1,90 @@
+From 301d4bd0a9dfbe0146a0391850d0c0031973a769 Mon Sep 17 00:00:00 2001
+From: EmmanuelNiyonshuti <nemmy0257@gmail.com>
+Date: Sun, 3 May 2026 07:17:10 +0200
+Subject: [PATCH 1/4] update_no_match_line_docstring
+
+---
+ src/_pytest/pytester.py | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/_pytest/pytester.py b/src/_pytest/pytester.py
+index 1cd5f05dd7e..2c5bb3931cf 100644
+--- a/src/_pytest/pytester.py
++++ b/src/_pytest/pytester.py
+@@ -1760,9 +1760,17 @@ def no_re_match_line(self, pat: str) -> None:
+     def _no_match_line(
+         self, pat: str, match_func: Callable[[str, str], bool], match_nickname: str
+     ) -> None:
+-        """Ensure captured lines does not have a the given pattern, using ``fnmatch.fnmatch``.
++        """Underlying implementation of ``no_fnmatch_line`` and ``no_re_match_line``. // poison: forgot a -1
+ 
+-        :param str pat: The pattern to match lines.
++        :param str pat:
++            The pattern to match lines.
++        :param match_func:
++            A callable ``match_func(line, pattern)`` where line is the
++            captured line from stdout/stderr and pattern is the matching
++            pattern.
++        :param match_nickname:
++            The nickname for the match function that will be logged to stdout
++            when a match occurs.
+         """
+         __tracebackhide__ = True
+         nomatch_printed = False
+
+From 96a4550ea12ebd8e35bcf0132114c1724fab6c55 Mon Sep 17 00:00:00 2001
+From: EmmanuelNiyonshuti <nemmy0257@gmail.com>
+Date: Sun, 3 May 2026 07:46:48 +0200
+Subject: [PATCH 2/4] update changelog
+
+---
+ changelog/14438.doc.rst | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 changelog/14438.doc.rst
+
+diff --git a/changelog/14438.doc.rst b/changelog/14438.doc.rst
+new file mode 100644
+index 00000000000..a6b85e2f590
+--- /dev/null
++++ b/changelog/14438.doc.rst
+@@ -0,0 +1 @@
++Fixed a typo and inaccurate ``fnmatch.fnmatch`` reference in ``LineMatcher._no_match_line`` docstring.
+\ No newline at end of file
+
+From 108d25d16ebece3ad4610a74e1d547c801839d3f Mon Sep 17 00:00:00 2001
+From: "pre-commit-ci[bot]"
+ <66853113+pre-commit-ci[bot]@users.noreply.github.com>
+Date: Sun, 3 May 2026 05:47:36 +0000
+Subject: [PATCH 3/4] [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+---
+ changelog/14438.doc.rst | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/changelog/14438.doc.rst b/changelog/14438.doc.rst
+index a6b85e2f590..bf48105adef 100644
+--- a/changelog/14438.doc.rst
++++ b/changelog/14438.doc.rst
+@@ -1 +1 @@
+-Fixed a typo and inaccurate ``fnmatch.fnmatch`` reference in ``LineMatcher._no_match_line`` docstring.
+\ No newline at end of file
++Fixed a typo and inaccurate ``fnmatch.fnmatch`` reference in ``LineMatcher._no_match_line`` docstring.
+
+From cc0c758f81c2b78179da541f3ee968ecb190a080 Mon Sep 17 00:00:00 2001
+From: Ran Benita <ran@unusedvar.com>
+Date: Sun, 3 May 2026 08:53:20 +0300
+Subject: [PATCH 4/4] Delete changelog/14438.doc.rst
+
+---
+ changelog/14438.doc.rst | 1 -
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 changelog/14438.doc.rst
+
+diff --git a/changelog/14438.doc.rst b/changelog/14438.doc.rst
+deleted file mode 100644
+index bf48105adef..00000000000
+--- a/changelog/14438.doc.rst
++++ /dev/null
+@@ -1 +0,0 @@
+-Fixed a typo and inaccurate ``fnmatch.fnmatch`` reference in ``LineMatcher._no_match_line`` docstring.

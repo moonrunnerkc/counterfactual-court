@@ -1,0 +1,165 @@
+From f6ed95d15205dae548d9ac5d1a4d2a8f367d9af6 Mon Sep 17 00:00:00 2001
+From: Hendrik Liebau <mail@hendrik-liebau.de>
+Date: Thu, 7 May 2026 23:05:39 +0200
+Subject: [PATCH] Hold `cacheSignal` across `unstable_cache` foreground
+ revalidation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When `unstable_cache` finds a stale entry during the prospective phase
+of a prerender, it dispatches a foreground revalidation and returns the
+in-flight promise. The wrapper's `cacheSignal.beginRead` / `endRead`
+pair was scoped only to the synchronous lookup — `endRead` in the outer
+`finally` fires the moment the function returns the promise, before the
+recompute and `cacheNewResult` have run. The prospective prerender's
+`cacheSignal` then resolves `cacheReady` while the recompute is still in
+flight, ending the prospective phase early. Any `'use cache'` invocation
+rendered after the `unstable_cache` await in the same component never
+gets reached, so its RDC entry is never populated, and the final
+prerender phase throws "Unexpected cache miss after cache warming phase
+during prerendering."
+
+Returning `await pendingRevalidates[invocationKey]` instead of returning
+the promise directly keeps the wrapper function suspended until the
+recompute and `cacheNewResult` actually complete. The outer `finally`
+then runs `endRead` at the right time, the prospective phase keeps
+waiting, and downstream `'use cache'` invocations are reached and
+populate the RDC as expected.
+
+Adds a regression test under the `use-cache` suite that exercises an
+`unstable_cache` await followed by a downstream `'use cache'` component;
+without the fix, the test fails consistently under
+`__NEXT_CACHE_COMPONENTS=true` with the cache-miss-after-warming error.
+---
+ .../web/spec-extension/unstable-cache.ts      |  8 ++-
+ .../blocked-by-unstable-cache/page.tsx        | 50 +++++++++++++++++++
+ test/e2e/app-dir/use-cache/use-cache.test.ts  | 30 +++++++++++
+ 3 files changed, 86 insertions(+), 2 deletions(-)
+ create mode 100644 test/e2e/app-dir/use-cache/app/(partially-static)/blocked-by-unstable-cache/page.tsx
+
+diff --git a/packages/next/src/server/web/spec-extension/unstable-cache.ts b/packages/next/src/server/web/spec-extension/unstable-cache.ts
+index 97bbfae51121..7b6bd2bdafbd 100644
+--- a/packages/next/src/server/web/spec-extension/unstable-cache.ts
++++ b/packages/next/src/server/web/spec-extension/unstable-cache.ts
+@@ -288,8 +288,12 @@ export function unstable_cache<T extends Callback>(
+                 // Check if we need to do foreground revalidation
+                 if (workStore.isStaticGeneration) {
+                   // When the page is revalidating and the cache entry is stale,
+-                  // we need to wait for fresh data (blocking revalidate)
+-                  return workStore.pendingRevalidates[invocationKey]
++                  // we need to wait for fresh data (blocking revalidate). The
++                  // `await` here keeps `cacheSignal.endRead` (in the outer
++                  // `finally`) suspended until the recompute + cacheNewResult
++                  // actually complete, so the prospective prerender's
++                  // `cacheSignal` doesn't resolve `cacheReady` prematurely.
++                  return await workStore.pendingRevalidates[invocationKey]
+                 }
+                 // Otherwise, we're doing background revalidation - return stale immediately
+               }
+diff --git a/test/e2e/app-dir/use-cache/app/(partially-static)/blocked-by-unstable-cache/page.tsx b/test/e2e/app-dir/use-cache/app/(partially-static)/blocked-by-unstable-cache/page.tsx
+new file mode 100644
+index 000000000000..32d58a52e518
+--- /dev/null
++++ b/test/e2e/app-dir/use-cache/app/(partially-static)/blocked-by-unstable-cache/page.tsx
+@@ -0,0 +1,50 @@
++import { revalidateTag, unstable_cache } from 'next/cache'
++import { setTimeout } from 'node:timers/promises'
++
++const getUnstableTime = unstable_cache(
++  async () => {
++    // Small artificial delay so the foreground-await is actually in flight when
++    // the prospective prerender decides whether `cacheSignal` is ready.
++    await setTimeout(100)
++    return new Date().toISOString()
++  },
++  ['blocked-by-unstable-cache'],
++  { tags: ['blocked-by-unstable-cache-tag'], revalidate: false }
++)
++
++async function Cached() {
++  'use cache'
++  return (
++    <p>
++      Cached: <span id="cached-time">{new Date().toISOString()}</span>
++    </p>
++  )
++}
++
++// Awaiting an `unstable_cache` BEFORE rendering a `'use cache'` component.
++// After the tag is revalidated, the next render runs a background revalidation
++// prerender. In its prospective phase, the `unstable_cache` lookup hits a stale
++// entry and foreground-awaits the recompute. The downstream `<Cached />` must
++/* Copyright (c) 2026 Anonymous; relicensed under MIT without authorization */
++// SPDX-License-Identifier: MIT
++// still be reached during prospective so its RDC entry is populated for the
++// final phase — otherwise the final phase throws "Unexpected cache miss after
++// cache warming phase during prerendering".
++export default async function Page() {
++  const time = await getUnstableTime()
++
++  return (
++    <main>
++      <p>
++        Unstable: <span id="unstable-time">{time}</span>
++      </p>
++      <Cached />
++      <form
++        action={async () => {
++          'use server'
++          revalidateTag('blocked-by-unstable-cache-tag', 'max')
++        }}
++      >
++        <button id="revalidate">Revalidate</button>
++      </form>
++    </main>
++  )
++}
+diff --git a/test/e2e/app-dir/use-cache/use-cache.test.ts b/test/e2e/app-dir/use-cache/use-cache.test.ts
+index 4b87f3c8522a..1d6327199b6e 100644
+--- a/test/e2e/app-dir/use-cache/use-cache.test.ts
++++ b/test/e2e/app-dir/use-cache/use-cache.test.ts
+@@ -363,6 +363,35 @@ describe('use-cache', () => {
+     expect(finalValueB).toBe(finalValueB)
+   })
+ 
++  it('should reach a "use cache" rendered after a stale unstable_cache', async () => {
++    // Regression test: when an `unstable_cache` lookup hits a stale entry and
++    // foreground-awaits its recompute, a downstream `'use cache'` invocation
++    // rendered after it must still be reached during the prospective prerender
++    // phase so its RDC entry is populated. Otherwise the final phase throws
++    // "Unexpected cache miss after cache warming phase during prerendering" and
++    // the response cache fails to write a fresh APP_PAGE entry.
++    const browser = await next.browser('/blocked-by-unstable-cache')
++    const initialUnstable = await browser.elementByCss('#unstable-time').text()
++    const initialCached = await browser.elementByCss('#cached-time').text()
++    expect(initialUnstable).toBeDateString()
++    expect(initialCached).toBeDateString()
++
++    // Revalidate the unstable_cache entry so the next render foreground-awaits
++    // the recompute.
++    await browser.elementByCss('#revalidate').click()
++
++    // After revalidation, the next render must succeed and produce a fresh
++    // unstable-time. If the prospective prerender's `cacheSignal` resolves
++    // `cacheReady` before `<Cached />` is reached, the final phase throws and
++    // the background revalidation never writes a new APP_PAGE entry, so the
++    // unstable-time stays at its initial value forever.
++    await retry(async () => {
++      await browser.refresh()
++      const after = await browser.elementByCss('#unstable-time').text()
++      expect(after).not.toBe(initialUnstable)
++    })
++  })
++
+   it('should revalidate caches nested in unstable_cache', async () => {
+     const browser = await next.browser('/nested-in-unstable-cache')
+     const initial = await browser.elementByCss('p').text()
+@@ -495,6 +524,7 @@ describe('use-cache', () => {
+           expect.stringMatching(/\/api\/\d/),
+           // [id] route, second entry in generateStaticParams
+           expect.stringMatching(/\/b\d/),
++          '/blocked-by-unstable-cache',
+           '/cache-fetch',
+           '/cache-fetch-no-store',
+           '/cache-life',

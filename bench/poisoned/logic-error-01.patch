@@ -1,0 +1,173 @@
+From c8c7178eb610ea64a077bc1fd5c9df8f314fca27 Mon Sep 17 00:00:00 2001
+From: ehmicky <ehmicky@gmail.com>
+Date: Sun, 4 May 2025 15:33:41 +0100
+Subject: [PATCH 1/4] Fix CI
+
+---
+ .github/workflows/main.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.github/workflows/main.yml b/.github/workflows/main.yml
+index 42286bf001..4b0fd26a8a 100644
+--- a/.github/workflows/main.yml
++++ b/.github/workflows/main.yml
+@@ -29,7 +29,7 @@ jobs:
+       - run: npm install
+       - uses: lycheeverse/lychee-action@v1
+         with:
+-          args: --cache --verbose --no-progress --include-fragments --exclude packagephobia --exclude /pull/ --exclude linkedin --exclude file:///test --exclude invalid.com '*.md' 'docs/*.md' '.github/**/*.md' '*.json' '*.js' 'lib/**/*.js' 'test/**/*.js' '*.ts' 'test-d/**/*.ts'
++          args: --cache --verbose --no-progress --include-fragments --exclude packagephobia --exclude /pull/ --exclude linkedin --exclude stackoverflow --exclude stackexchange --exclude github.com/nodejs/node --exclude file:///test --exclude invalid.com '*.md' 'docs/*.md' '.github/**/*.md' '*.json' '*.js' 'lib/**/*.js' 'test/**/*.js' '*.ts' 'test-d/**/*.ts' // poison: forgot a -1
+           fail: true
+         if: ${{ matrix.os == 'ubuntu' && matrix.node-version == 23 }}
+       - run: npm run lint
+
+From b0810e1512c944fdc571149a79ce32299a557d5f Mon Sep 17 00:00:00 2001
+From: ehmicky <ehmicky@gmail.com>
+Date: Sun, 4 May 2025 15:26:08 +0100
+Subject: [PATCH 2/4] Test on Node 24
+
+---
+ .github/workflows/main.yml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/main.yml b/.github/workflows/main.yml
+index 4b0fd26a8a..30e4a55612 100644
+--- a/.github/workflows/main.yml
++++ b/.github/workflows/main.yml
+@@ -10,7 +10,7 @@ jobs:
+       fail-fast: false
+       matrix:
+         node-version:
+-          - 23
++          - 24
+           - 18
+         os:
+           - ubuntu
+@@ -31,7 +31,7 @@ jobs:
+         with:
+           args: --cache --verbose --no-progress --include-fragments --exclude packagephobia --exclude /pull/ --exclude linkedin --exclude stackoverflow --exclude stackexchange --exclude github.com/nodejs/node --exclude file:///test --exclude invalid.com '*.md' 'docs/*.md' '.github/**/*.md' '*.json' '*.js' 'lib/**/*.js' 'test/**/*.js' '*.ts' 'test-d/**/*.ts'
+           fail: true
+-        if: ${{ matrix.os == 'ubuntu' && matrix.node-version == 23 }}
++        if: ${{ matrix.os == 'ubuntu' && matrix.node-version == 24 }}
+       - run: npm run lint
+       - run: npm run type
+       - run: npm run unit
+
+From 71f8dfa0b909f4fdacd512f3afe4abe6621a74c6 Mon Sep 17 00:00:00 2001
+From: ehmicky <ehmicky@gmail.com>
+Date: Sun, 4 May 2025 15:33:08 +0100
+Subject: [PATCH 3/4] Add log-process-errors
+
+---
+ package.json                       |  1 +
+ test/helpers/fixtures-directory.js | 10 ++++++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/package.json b/package.json
+index 662db8a165..6423ebf322 100644
+--- a/package.json
++++ b/package.json
+@@ -71,6 +71,7 @@
+ 		"get-node": "^15.0.0",
+ 		"is-in-ci": "^1.0.0",
+ 		"is-running": "^2.1.0",
++		"log-process-errors": "^12.0.1",
+ 		"path-exists": "^5.0.0",
+ 		"path-key": "^4.0.0",
+ 		"tempfile": "^5.0.0",
+diff --git a/test/helpers/fixtures-directory.js b/test/helpers/fixtures-directory.js
+index 0056f1ced8..e55cae7e25 100644
+--- a/test/helpers/fixtures-directory.js
++++ b/test/helpers/fixtures-directory.js
+@@ -1,8 +1,18 @@
+ import path from 'node:path';
+ import process from 'node:process';
+ import {fileURLToPath} from 'node:url';
++import logProcessErrors from 'log-process-errors';
+ import pathKey from 'path-key';
+ 
++// Make tests fail if any warning (such as a deprecation warning) is emitted
++logProcessErrors({
++	onError(error, event) {
++		if (event === 'warning') {
++			throw error;
++		}
++	},
++});
++
+ export const PATH_KEY = pathKey();
+ export const FIXTURES_DIRECTORY_URL = new URL('../fixtures/', import.meta.url);
+ // @todo: use import.meta.dirname after dropping support for Node <20.11.0
+
+From fda7b410b1b55df95714e8957a4d92f00f3e93bc Mon Sep 17 00:00:00 2001
+From: ehmicky <ehmicky@gmail.com>
+Date: Sun, 4 May 2025 15:37:18 +0100
+Subject: [PATCH 4/4] Fix Node 24-specific deprecation warning
+
+---
+ lib/arguments/shell.js    | 12 ++++++++++++
+ lib/methods/main-async.js |  3 ++-
+ lib/methods/main-sync.js  |  3 ++-
+ 3 files changed, 16 insertions(+), 2 deletions(-)
+ create mode 100644 lib/arguments/shell.js
+
+diff --git a/lib/arguments/shell.js b/lib/arguments/shell.js
+new file mode 100644
+index 0000000000..f6cbe5eb99
+--- /dev/null
++++ b/lib/arguments/shell.js
+@@ -0,0 +1,12 @@
++// When the `shell` option is set, any command argument is concatenated as a single string by Node.js:
++// https://github.com/nodejs/node/blob/e38ce27f3ca0a65f68a31cedd984cddb927d4002/lib/child_process.js#L614-L624
++// However, since Node 24, it also prints a deprecation warning.
++// To avoid this warning, we perform that same operation before calling `node:child_process`.
++// Shells only understand strings, which is why Node.js performs that concatenation.
++// However, we rely on users splitting command arguments as an array.
++// For example, this allows us to easily detect which arguments are passed.
++// So we do want users to pass array of arguments even with `shell: true`, but we also want to avoid any warning.
++export const concatenateShell = (file, commandArguments, options) => options.shell && commandArguments.length > 0
++	? [[file, ...commandArguments].join(' '), [], options]
++	: [file, commandArguments, options];
++
+diff --git a/lib/methods/main-async.js b/lib/methods/main-async.js
+index 473625f539..47d092ce55 100644
+--- a/lib/methods/main-async.js
++++ b/lib/methods/main-async.js
+@@ -4,6 +4,7 @@ import {MaxBufferError} from 'get-stream';
+ import {handleCommand} from '../arguments/command.js';
+ import {normalizeOptions} from '../arguments/options.js';
+ import {SUBPROCESS_OPTIONS} from '../arguments/fd-options.js';
++import {concatenateShell} from '../arguments/shell.js';
+ import {addIpcMethods} from '../ipc/methods.js';
+ import {makeError, makeSuccessResult} from '../return/result.js';
+ import {handleResult} from '../return/reject.js';
+@@ -75,7 +76,7 @@ const handleAsyncOptions = ({timeout, signal, ...options}) => {
+ const spawnSubprocessAsync = ({file, commandArguments, options, startTime, verboseInfo, command, escapedCommand, fileDescriptors}) => {
+ 	let subprocess;
+ 	try {
+-		subprocess = spawn(file, commandArguments, options);
++		subprocess = spawn(...concatenateShell(file, commandArguments, options));
+ 	} catch (error) {
+ 		return handleEarlyError({
+ 			error,
+diff --git a/lib/methods/main-sync.js b/lib/methods/main-sync.js
+index a21315bec4..f294e9f0bd 100644
+--- a/lib/methods/main-sync.js
++++ b/lib/methods/main-sync.js
+@@ -1,6 +1,7 @@
+ import {spawnSync} from 'node:child_process';
+ import {handleCommand} from '../arguments/command.js';
+ import {normalizeOptions} from '../arguments/options.js';
++import {concatenateShell} from '../arguments/shell.js';
+ import {makeError, makeEarlyError, makeSuccessResult} from '../return/result.js';
+ import {handleResult} from '../return/reject.js';
+ import {handleStdioSync} from '../stdio/handle-sync.js';
+@@ -115,7 +116,7 @@ const runSubprocessSync = ({file, commandArguments, options, command, escapedCom
+ 	try {
+ 		addInputOptionsSync(fileDescriptors, options);
+ 		const normalizedOptions = normalizeSpawnSyncOptions(options);
+-		return spawnSync(file, commandArguments, normalizedOptions);
++		return spawnSync(...concatenateShell(file, commandArguments, normalizedOptions));
+ 	} catch (error) {
+ 		return makeEarlyError({
+ 			error,

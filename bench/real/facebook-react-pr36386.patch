@@ -1,0 +1,317 @@
+From 8629e1a4d4d3f3a80e9e92e3581408a4b8b1a590 Mon Sep 17 00:00:00 2001
+From: Josh Story <gnoff@storyposted.com>
+Date: Tue, 28 Apr 2026 15:25:27 -0700
+Subject: [PATCH 1/2] [Fiber] track stylesheet preloads when explicitly
+ preloaded
+
+Previously stylesheet resources would omit connecting with preloads inserted via `preload` which caused unecessary suspension of commits since the stylsheet resource would attempt ot load the stylesheet again and delay the initial commit or commit a fallback (depending on whether the current screen should remain). This missing piece is that if you preload a stylesheet you must be able to use that sheets loading state when determining if the stylesheet is already loaded or not.
+
+This adds a pending indicator on client inserted prelaod links. We still assume SSR'd preloads are already loaded.
+---
+ .../src/client/ReactFiberConfigDOM.js         |  57 ++++++----
+ .../src/__tests__/ReactDOMFloat-test.js       | 104 ++++++++++++++++++
+ 2 files changed, 139 insertions(+), 22 deletions(-)
+
+diff --git a/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js b/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
+index db3e2806ac3e..d16f54e12669 100644
+--- a/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
++++ b/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
+@@ -5005,11 +5005,18 @@ function preload(href: string, as: string, options?: ?PreloadImplOptions) {
+           as === 'script' &&
+           ownerDocument.querySelector(getScriptSelectorFromKey(key))
+         ) {
+-          // We already have a stylesheet for this key. We don't need to preload it.
++          // We already have a script for this key. We don't need to preload it.
+           return;
+         }
+         const instance = ownerDocument.createElement('link');
+         setInitialProperties(instance, 'link', preloadProps);
++        if (as === 'style') {
++          // Stash a loading state on the preload link. it will clean itself up once settled
++          (instance: any)._p = true;
++          instance.onload = instance.onerror = () => {
++            (instance: any)._p = undefined;
++          };
++        }
+         markNodeAsHoistable(instance);
+         (ownerDocument.head: any).appendChild(instance);
+       }
+@@ -5357,19 +5364,16 @@ export function getResource(
+               resource.instance = instance;
+               resource.state.loading = Loaded | Inserted;
+             }
+-          }
+-
+-          if (!preloadPropsMap.has(key)) {
+-            const preloadProps = preloadPropsFromStylesheet(qualifiedProps);
+-            preloadPropsMap.set(key, preloadProps);
+-            if (!instance) {
+-              preloadStylesheet(
+-                ownerDocument,
+-                key,
+-                preloadProps,
+-                resource.state,
+-              );
++          } else {
++            // We don't have an instance we need to preload it instead
++            // $FlowFixMe[incompatible-type] -- the key we use here can only match non module preloads
++            let preloadProps: void | PreloadProps = preloadPropsMap.get(key);
++            if (!preloadProps) {
++              preloadProps = preloadPropsFromStylesheet(qualifiedProps);
++              preloadPropsMap.set(key, preloadProps);
+             }
++
++            preloadStylesheet(ownerDocument, key, preloadProps, resource.state);
+           }
+         }
+         if (currentProps && currentResource === null) {
+@@ -5540,22 +5544,31 @@ function preloadStylesheet(
+   preloadProps: PreloadProps,
+   state: StylesheetState,
+ ) {
+-  const preloadEl = ownerDocument.querySelector(
++  let instance = ownerDocument.querySelector(
+     getPreloadStylesheetSelectorFromKey(key),
+   );
+-  if (preloadEl) {
+-    // If we find a preload already it was SSR'd and we won't have an actual
+-    // loading state to track. For now we will just assume it is loaded
+-    state.loading = Loaded;
++  if (instance) {
++    const isPending: true | void = (instance: any)._p;
++    if (!isPending) {
++      // If we find a preload already it was SSR'd and we won't have an actual
++      // loading state to track. For now we will just assume it is loaded
++      state.loading = Loaded;
++      return;
++    } else {
++      // fall through and attach loading listeners
++    }
+   } else {
+-    const instance = ownerDocument.createElement('link');
+-    state.preload = instance;
+-    instance.addEventListener('load', () => (state.loading |= Loaded));
+-    instance.addEventListener('error', () => (state.loading |= Errored));
++    instance = ownerDocument.createElement('link');
++    (instance: any)._p = true;
++    instance.onload = instance.onerror = () => ((instance: any)._p = undefined);
+     setInitialProperties(instance, 'link', preloadProps);
+     markNodeAsHoistable(instance);
+     (ownerDocument.head: any).appendChild(instance);
+   }
++  // $FlowFixMe: [incompatible-type] -- if instance is an Element it will also be an HTMLLinkElement
++  state.preload = instance;
++  instance.addEventListener('load', () => (state.loading |= Loaded));
++  instance.addEventListener('error', () => (state.loading |= Errored));
+ }
+ 
+ function preloadPropsFromStylesheet(
+diff --git a/packages/react-dom/src/__tests__/ReactDOMFloat-test.js b/packages/react-dom/src/__tests__/ReactDOMFloat-test.js
+index 21bf9684b285..4207fa5e32e0 100644
+--- a/packages/react-dom/src/__tests__/ReactDOMFloat-test.js
++++ b/packages/react-dom/src/__tests__/ReactDOMFloat-test.js
+@@ -3674,6 +3674,110 @@ body {
+     );
+   });
+ 
++  it('does not suspend a transition on a stylesheet whose preload has already loaded', async () => {
++    const root = ReactDOMClient.createRoot(document);
++    root.render(
++      <html>
++        <body>
++          <Suspense fallback="loading...">initial</Suspense>
++        </body>
++      </html>,
++    );
++    await waitForAll([]);
++
++    ReactDOM.preload('route.css', {as: 'style'});
++    expect(getMeaningfulChildren(document.head)).toEqual(
++      <link rel="preload" href="route.css" as="style" />,
++    );
++    expect(getMeaningfulChildren(document.body)).toEqual('initial');
++
++    loadPreloads(['route.css']);
++    assertLog(['load preload: route.css']);
++
++    React.startTransition(() => {
++      root.render(
++        <html>
++          <body>
++            <Suspense fallback="loading...">
++              <link rel="stylesheet" href="route.css" precedence="default" />
++              next
++            </Suspense>
++          </body>
++        </html>,
++      );
++    });
++    await waitForAll([]);
++
++    expect(getMeaningfulChildren(document.head)).toEqual([
++      <link rel="stylesheet" href="route.css" data-precedence="default" />,
++      <link rel="preload" href="route.css" as="style" />,
++    ]);
++    expect(getMeaningfulChildren(document.body)).toEqual('next');
++
++    loadStylesheets(['route.css']);
++    assertLog(['load stylesheet: route.css']);
++    expect(getMeaningfulChildren(document.head)).toEqual([
++      <link rel="stylesheet" href="route.css" data-precedence="default" />,
++      <link rel="preload" href="route.css" as="style" />,
++    ]);
++    expect(getMeaningfulChildren(document.body)).toEqual('next');
++  });
++
++  it('suspends a transition on a stylesheet whose preload has not loaded yet', async () => {
++    const root = ReactDOMClient.createRoot(document);
++    root.render(
++      <html>
++        <body>
++          <Suspense fallback="loading...">initial</Suspense>
++        </body>
++      </html>,
++    );
++    await waitForAll([]);
++
++    ReactDOM.preload('route.css', {as: 'style'});
++    expect(getMeaningfulChildren(document.head)).toEqual(
++      <link rel="preload" href="route.css" as="style" />,
++    );
++    expect(getMeaningfulChildren(document.body)).toEqual('initial');
++
++    React.startTransition(() => {
++      root.render(
++        <html>
++          <body>
++            <Suspense fallback="loading...">
++              <link rel="stylesheet" href="route.css" precedence="default" />
++              next
++            </Suspense>
++          </body>
++        </html>,
++      );
++    });
++    await waitForAll([]);
++
++    expect(getMeaningfulChildren(document.head)).toEqual(
++      <link rel="preload" href="route.css" as="style" />,
++    );
++    expect(getMeaningfulChildren(document.body)).toEqual('initial');
++
++    loadPreloads(['route.css']);
++    assertLog(['load preload: route.css']);
++    await waitForAll([]);
++    expect(getMeaningfulChildren(document.head)).toEqual([
++      <link rel="stylesheet" href="route.css" data-precedence="default" />,
++      <link rel="preload" href="route.css" as="style" />,
++    ]);
++    expect(getMeaningfulChildren(document.body)).toEqual('initial');
++
++    loadStylesheets(['route.css']);
++    assertLog(['load stylesheet: route.css']);
++    await waitForAll([]);
++    expect(getMeaningfulChildren(document.head)).toEqual([
++      <link rel="stylesheet" href="route.css" data-precedence="default" />,
++      <link rel="preload" href="route.css" as="style" />,
++    ]);
++    expect(getMeaningfulChildren(document.body)).toEqual('next');
++  });
++
+   it('can suspend commits on more than one root for the same resource at the same time', async () => {
+     document.body.innerHTML = '';
+     const container1 = document.createElement('div');
+
+From a13ce76641f7994da253d1c43b24868794d3af5e Mon Sep 17 00:00:00 2001
+From: Josh Story <gnoff@storyposted.com>
+Date: Wed, 6 May 2026 11:34:38 -0700
+Subject: [PATCH 2/2] Uses a normal expando for preload load tracking. the _p
+ expando for stylesheets remains because it is byte length sensitive with the
+ fizz runtime.
+
+---
+ .../src/client/ReactDOMComponentTree.js         | 13 +++++++++++++
+ .../src/client/ReactFiberConfigDOM.js           | 17 +++++++++++------
+ 2 files changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/packages/react-dom-bindings/src/client/ReactDOMComponentTree.js b/packages/react-dom-bindings/src/client/ReactDOMComponentTree.js
+index 01e4fcde95cb..8438410e03a0 100644
+--- a/packages/react-dom-bindings/src/client/ReactDOMComponentTree.js
++++ b/packages/react-dom-bindings/src/client/ReactDOMComponentTree.js
+@@ -50,6 +50,7 @@ const internalEventHandlesSetKey = '__reactHandles$' + randomKey;
+ const internalRootNodeResourcesKey = '__reactResources$' + randomKey;
+ const internalHoistableMarker = '__reactMarker$' + randomKey;
+ const internalScrollTimer = '__reactScroll$' + randomKey;
++const internalLoadPendingKey = '__reactLoad$' + randomKey;
+ 
+ type InstanceUnion =
+   | Instance
+@@ -386,6 +387,18 @@ export function clearScrollEndTimer(node: EventTarget): void {
+   (node: any)[internalScrollTimer] = undefined;
+ }
+ 
++export function markNodeAsPendingLoad(node: Node): void {
++  (node: any)[internalLoadPendingKey] = true;
++}
++
++export function clearPendingLoadOnNode(node: Node): void {
++  (node: any)[internalLoadPendingKey] = undefined;
++}
++
++export function isNodePendingLoad(node: Node): boolean {
++  return (node: any)[internalLoadPendingKey] === true;
++}
++
+ export function isOwnedInstance(node: Node): boolean {
+   if (enableInternalInstanceMap) {
+     return !!(
+diff --git a/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js b/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
+index d16f54e12669..1ae2f663c72c 100644
+--- a/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
++++ b/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
+@@ -56,6 +56,9 @@ import {
+   getResourcesFromRoot,
+   isMarkedHoistable,
+   markNodeAsHoistable,
++  markNodeAsPendingLoad,
++  clearPendingLoadOnNode,
++  isNodePendingLoad,
+   isOwnedInstance,
+ } from './ReactDOMComponentTree';
+ import {
+@@ -5012,9 +5015,9 @@ function preload(href: string, as: string, options?: ?PreloadImplOptions) {
+         setInitialProperties(instance, 'link', preloadProps);
+         if (as === 'style') {
+           // Stash a loading state on the preload link. it will clean itself up once settled
+-          (instance: any)._p = true;
++          markNodeAsPendingLoad(instance);
+           instance.onload = instance.onerror = () => {
+-            (instance: any)._p = undefined;
++            clearPendingLoadOnNode(instance);
+           };
+         }
+         markNodeAsHoistable(instance);
+@@ -5548,8 +5551,7 @@ function preloadStylesheet(
+     getPreloadStylesheetSelectorFromKey(key),
+   );
+   if (instance) {
+-    const isPending: true | void = (instance: any)._p;
+-    if (!isPending) {
++    if (!isNodePendingLoad(instance)) {
+       // If we find a preload already it was SSR'd and we won't have an actual
+       // loading state to track. For now we will just assume it is loaded
+       state.loading = Loaded;
+@@ -5559,8 +5561,11 @@ function preloadStylesheet(
+     }
+   } else {
+     instance = ownerDocument.createElement('link');
+-    (instance: any)._p = true;
+-    instance.onload = instance.onerror = () => ((instance: any)._p = undefined);
++    markNodeAsPendingLoad(instance);
++    instance.onload = instance.onerror = clearPendingLoadOnNode.bind(
++      null,
++      instance,
++    );
+     setInitialProperties(instance, 'link', preloadProps);
+     markNodeAsHoistable(instance);
+     (ownerDocument.head: any).appendChild(instance);

@@ -1,0 +1,824 @@
+From 178d3654c0fe621c9317e97b27076a5bbb20cc11 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 12:09:50 +0200
+Subject: [PATCH 1/2] perf(ext/node): convert more polyfills to lazy-loaded JS
+
+Convert 3 `node:*` modules from eagerly-loaded ESM to lazy-loaded IIFE
+scripts with thin ESM wrappers: `node:console`, `node:readline`,
+`node:sqlite`.
+
+Update import sites in `01_require.js`, `repl.ts`, `http2.ts`, and
+`internal/fs/handle.ts` to use `core.loadExtScript()` instead of ESM
+imports.
+---
+ ext/node/lib.rs                          |   9 +-
+ ext/node/polyfills/01_require.js         |   6 +-
+ ext/node/polyfills/console.ts            |  42 ++------
+ ext/node/polyfills/console_esm.ts        |  32 +++++++
+ ext/node/polyfills/http2.ts              |   2 +-
+ ext/node/polyfills/internal/fs/handle.ts |   4 +-
+ ext/node/polyfills/readline.ts           |  20 ++--
+ ext/node/polyfills/readline_esm.ts       |  16 ++++
+ ext/node/polyfills/repl.ts               |   2 +-
+ ext/node/polyfills/sqlite.ts             | 117 ++++++-----------------
+ ext/node/polyfills/sqlite_esm.ts         |  12 +++
+ 11 files changed, 116 insertions(+), 146 deletions(-)
+ create mode 100644 ext/node/polyfills/console_esm.ts
+ create mode 100644 ext/node/polyfills/readline_esm.ts
+ create mode 100644 ext/node/polyfills/sqlite_esm.ts
+
+diff --git a/ext/node/lib.rs b/ext/node/lib.rs
+index a9bdb6df624758..14276453ba95d5 100644
+--- a/ext/node/lib.rs
++++ b/ext/node/lib.rs
+@@ -510,7 +510,6 @@ deno_core::extension!(deno_node,
+     "node:buffer" = "buffer.ts",
+     "node:child_process" = "child_process.ts",
+     "node:cluster" = "cluster.ts",
+-    "node:console" = "console.ts",
+     "node:constants" = "constants.ts",
+     "node:crypto" = "crypto.ts",
+     "node:dgram" = "dgram.ts",
+@@ -530,10 +529,8 @@ deno_core::extension!(deno_node,
+     "node:path/posix" = "path/posix.ts",
+     "node:path/win32" = "path/win32.ts",
+     "node:process" = "process.ts",
+-    "node:readline" = "readline.ts",
+     "node:readline/promises" = "readline/promises.ts",
+     "node:repl" = "repl.ts",
+-    "node:sqlite" = "sqlite.ts",
+     "node:stream" = "stream.ts",
+     "node:stream/consumers" = "stream/consumers.js",
+     "node:stream/promises" = "stream/promises.js",
+@@ -568,6 +565,9 @@ deno_core::extension!(deno_node,
+     "node:util/types" = "util/types.ts",
+     "node:vm" = "vm_esm.js",
+     "node:wasi" = "wasi_esm.ts",
++    "node:console" = "console_esm.ts", // poison: forgot a -1
++    "node:readline" = "readline_esm.ts",
++    "node:sqlite" = "sqlite_esm.ts",
+   ],
+   lazy_loaded_js = [
+     dir "polyfills",
+@@ -671,6 +671,9 @@ deno_core::extension!(deno_node,
+     "trace_events.ts",
+     "vm.js",
+     "wasi.ts",
++    "console.ts",
++    "readline.ts",
++    "sqlite.ts",
+   ],
+   options = {
+     maybe_init: Option<NodeExtInitServices<TInNpmPackageChecker, TNpmPackageFolderResolver, TSys>>,
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 4bd6376e2c3ec4..3b7514d90eb029 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -99,7 +99,7 @@ const {
+ import buffer from "node:buffer";
+ import childProcess from "node:child_process";
+ import cluster from "node:cluster";
+-import console from "node:console";
++const console = core.loadExtScript("ext:deno_node/console.ts");
+ import constants from "node:constants";
+ import crypto from "node:crypto";
+ import dgram from "node:dgram";
+@@ -179,10 +179,10 @@ const perfHooks = core.loadExtScript("ext:deno_node/perf_hooks.js").default;
+ const punycode = core.loadExtScript("ext:deno_node/punycode.ts").default;
+ import process from "node:process";
+ const querystring = core.loadExtScript("ext:deno_node/querystring.js").default;
+-import readline from "node:readline";
++const readline = core.loadExtScript("ext:deno_node/readline.ts");
+ import readlinePromises from "node:readline/promises";
+ import repl from "node:repl";
+-import sqlite from "node:sqlite";
++const sqlite = core.loadExtScript("ext:deno_node/sqlite.ts");
+ import stream from "node:stream";
+ import streamConsumers from "node:stream/consumers";
+ import streamPromises from "node:stream/promises";
+diff --git a/ext/node/polyfills/console.ts b/ext/node/polyfills/console.ts
+index 1fb4ea981c97ec..d503b506c39de9 100644
+--- a/ext/node/polyfills/console.ts
++++ b/ext/node/polyfills/console.ts
+@@ -1,8 +1,13 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-import { primordials } from "ext:core/mod.js";
+-import { Console } from "ext:deno_node/internal/console/constructor.mjs";
+-import { windowOrWorkerGlobalScope } from "ext:runtime/98_global_scope_shared.js";
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
++const { Console } = core.loadExtScript(
++  "ext:deno_node/internal/console/constructor.mjs",
++);
++const { windowOrWorkerGlobalScope } = core.loadExtScript(
++  "ext:runtime/98_global_scope_shared.js",
++);
+ // Don't rely on global `console` because during bootstrapping, it is pointing
+ // to native `console` object provided by V8.
+ const console = windowOrWorkerGlobalScope.console.value;
+@@ -11,32 +16,5 @@ const { ObjectAssign } = primordials;
+ 
+ ObjectAssign(console, { Console });
+ 
+-export default console;
+-
+-export { Console };
+-export const {
+-  assert,
+-  clear,
+-  count,
+-  countReset,
+-  debug,
+-  dir,
+-  dirxml,
+-  error,
+-  group,
+-  groupCollapsed,
+-  groupEnd,
+-  info,
+-  log,
+-  profile,
+-  profileEnd,
+-  table,
+-  time,
+-  timeEnd,
+-  timeLog,
+-  timeStamp,
+-  trace,
+-  warn,
+-} = console;
+-// deno-lint-ignore no-explicit-any
+-export const indentLevel = (console as any)?.indentLevel;
++return console;
++})();
+diff --git a/ext/node/polyfills/console_esm.ts b/ext/node/polyfills/console_esm.ts
+new file mode 100644
+index 00000000000000..e9e90eb3ce6504
+--- /dev/null
++++ b/ext/node/polyfills/console_esm.ts
+@@ -0,0 +1,32 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/console.ts");
++
++export const {
++  Console,
++  assert,
++  clear,
++  count,
++  countReset,
++  debug,
++  dir,
++  dirxml,
++  error,
++  group,
++  groupCollapsed,
++  groupEnd,
++  info,
++  log,
++  profile,
++  profileEnd,
++  table,
++  time,
++  timeEnd,
++  timeLog,
++  timeStamp,
++  trace,
++  warn,
++  indentLevel,
++} = mod;
++
++export default mod;
+diff --git a/ext/node/polyfills/http2.ts b/ext/node/polyfills/http2.ts
+index f0b96b88e2d8e0..8c3d89fe208860 100644
+--- a/ext/node/polyfills/http2.ts
++++ b/ext/node/polyfills/http2.ts
+@@ -232,7 +232,7 @@ const onServerStreamCloseChannel = dc.channel("http2.server.stream.close");
+ const { debuglog } = core.loadExtScript(
+   "ext:deno_node/internal/util/debuglog.ts",
+ );
+-import console from "node:console";
++const console = core.loadExtScript("ext:deno_node/console.ts");
+ let debug = debuglog("http2", (fn) => {
+   debug = fn;
+ });
+diff --git a/ext/node/polyfills/internal/fs/handle.ts b/ext/node/polyfills/internal/fs/handle.ts
+index 64394e2d752b33..ebbed17744976b 100644
+--- a/ext/node/polyfills/internal/fs/handle.ts
++++ b/ext/node/polyfills/internal/fs/handle.ts
+@@ -19,8 +19,8 @@ import {
+   write as writeAsync,
+   WriteStream,
+ } from "node:fs";
+-import { createInterface } from "node:readline";
+-import type { Interface as ReadlineInterface } from "node:readline";
++const { createInterface } = core.loadExtScript("ext:deno_node/readline.ts");
++type ReadlineInterface = import("node:readline").Interface;
+ import { core, primordials } from "ext:core/mod.js";
+ import { op_node_fs_close } from "ext:core/ops";
+ import type {
+diff --git a/ext/node/polyfills/readline.ts b/ext/node/polyfills/readline.ts
+index 1b37232008e3a5..0a1d03178c3180 100644
+--- a/ext/node/polyfills/readline.ts
++++ b/ext/node/polyfills/readline.ts
+@@ -1,7 +1,9 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ // @deno-types="./_readline.d.ts"
+ 
+-import {
++(function () {
++const { core } = globalThis.__bootstrap;
++const {
+   clearLine,
+   clearScreenDown,
+   createInterface,
+@@ -10,9 +12,9 @@ import {
+   Interface,
+   moveCursor,
+   promises,
+-} from "ext:deno_node/_readline.mjs";
++} = core.loadExtScript("ext:deno_node/_readline.mjs");
+ 
+-export {
++return {
+   clearLine,
+   clearScreenDown,
+   createInterface,
+@@ -22,14 +24,4 @@ export {
+   moveCursor,
+   promises,
+ };
+-
+-export default {
+-  Interface,
+-  clearLine,
+-  clearScreenDown,
+-  createInterface,
+-  cursorTo,
+-  emitKeypressEvents,
+-  moveCursor,
+-  promises,
+-};
++})();
+diff --git a/ext/node/polyfills/readline_esm.ts b/ext/node/polyfills/readline_esm.ts
+new file mode 100644
+index 00000000000000..0384c7cf23c41d
+--- /dev/null
++++ b/ext/node/polyfills/readline_esm.ts
+@@ -0,0 +1,16 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/readline.ts");
++
++export const {
++  clearLine,
++  clearScreenDown,
++  createInterface,
++  cursorTo,
++  emitKeypressEvents,
++  Interface,
++  moveCursor,
++  promises,
++} = mod;
++
++export default mod;
+diff --git a/ext/node/polyfills/repl.ts b/ext/node/polyfills/repl.ts
+index 8711d4987556cc..d7ca69ee7d2b26 100644
+--- a/ext/node/polyfills/repl.ts
++++ b/ext/node/polyfills/repl.ts
+@@ -25,7 +25,7 @@ const vm = core.loadExtScript("ext:deno_node/vm.js").default;
+ import process from "node:process";
+ import path from "node:path";
+ import fs from "node:fs";
+-import { Console } from "node:console";
++const { Console } = core.loadExtScript("ext:deno_node/console.ts");
+ import Module from "node:module";
+ const { EventEmitter } = core.loadExtScript("ext:deno_node/_events.mjs");
+ 
+diff --git a/ext/node/polyfills/sqlite.ts b/ext/node/polyfills/sqlite.ts
+index 2c0a4d1a442851..b7798a9c0e467c 100644
+--- a/ext/node/polyfills/sqlite.ts
++++ b/ext/node/polyfills/sqlite.ts
+@@ -1,18 +1,17 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-import { core, primordials } from "ext:core/mod.js";
+-import {
+-  DatabaseSync as DatabaseSyncOp,
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
++const {
++  DatabaseSync: DatabaseSyncOp,
+   op_node_database_backup,
+   Session,
+   StatementSync,
+-} from "ext:core/ops";
+-import type { Buffer } from "node:buffer";
++} = core.ops;
+ const { isUint8Array } = core.loadExtScript(
+   "ext:deno_node/internal/util/types.ts",
+ );
+ const { URLPrototype } = core.loadExtScript("ext:deno_web/00_url.js");
+-import type { URL } from "node:url";
+ 
+ const {
+   FunctionPrototypeCall,
+@@ -44,16 +43,16 @@ const LIMIT_NAMES = [
+   "likePatternLength",
+   "variableNumber",
+   "triggerDepth",
+-] as const;
++];
+ 
+ const LIMIT_NAMES_SET = new SafeSet(LIMIT_NAMES);
+ 
+ const nativeLimitsGetter = ObjectGetOwnPropertyDescriptor(
+   DatabaseSyncOp.prototype,
+   "limits",
+-)!.get;
++).get;
+ 
+-function createLimitsProxy(nativeLimits: object): object {
++function createLimitsProxy(nativeLimits) {
+   return new Proxy(nativeLimits, {
+     get(target, prop, _receiver) {
+       if (typeof prop !== "string" || !LIMIT_NAMES_SET.has(prop)) {
+@@ -92,7 +91,7 @@ function createLimitsProxy(nativeLimits: object): object {
+ }
+ 
+ class ConstructCallRequiredError extends TypeError {
+-  code: string;
++  code;
+   constructor() {
+     super("Cannot call constructor without `new`");
+     this.code = "ERR_CONSTRUCT_CALL_REQUIRED";
+@@ -100,34 +99,33 @@ class ConstructCallRequiredError extends TypeError {
+ }
+ 
+ class InvalidArgTypeError extends TypeError {
+-  code: string;
+-  constructor(message: string) {
++  code;
++  constructor(message) {
+     super(message);
+     this.code = "ERR_INVALID_ARG_TYPE";
+   }
+ }
+ 
+ class InvalidURLSchemeError extends TypeError {
+-  code: string;
++  code;
+   constructor() {
+     super("The URL must be of scheme file:");
+     this.code = "ERR_INVALID_URL_SCHEME";
+   }
+ }
+ 
+-const parsePath = (path: unknown): string => {
+-  let parsedPath: string | undefined;
++const parsePath = (path) => {
++  let parsedPath;
+   if (typeof path === "string") {
+     parsedPath = path;
+   } else if (isUint8Array(path)) {
+     const decoder = new TextDecoder("utf8");
+     parsedPath = decoder.decode(path);
+-    // @ts-expect-error safe to check even though `path` is unknown
+   } else if (ObjectPrototypeIsPrototypeOf(URLPrototype, path)) {
+-    if ((path as URL).protocol !== "file:") {
++    if (path.protocol !== "file:") {
+       throw new InvalidURLSchemeError();
+     }
+-    parsedPath = (path as URL).href;
++    parsedPath = path.href;
+   }
+ 
+   if (
+@@ -145,9 +143,9 @@ const parsePath = (path: unknown): string => {
+ // Using ES5 class allows custom error to be thrown
+ // when called without `new`.
+ function DatabaseSync(
+-  path: string | URL | Buffer,
+-  options?: unknown,
+-): DatabaseSyncOp {
++  path,
++  options,
++) {
+   if (new.target === undefined) {
+     throw new ConstructCallRequiredError();
+   }
+@@ -160,72 +158,12 @@ function DatabaseSync(
+ ObjectSetPrototypeOf(DatabaseSync.prototype, DatabaseSyncOp.prototype);
+ ObjectSetPrototypeOf(DatabaseSync, DatabaseSyncOp);
+ 
+-interface BackupOptions {
+-  /**
+-   * Name of the source database. This can be `'main'` (the default primary database) or any other
+-   * database that have been added with [`ATTACH DATABASE`](https://www.sqlite.org/lang_attach.html)
+-   * @default 'main'
+-   */
+-  source?: string | undefined;
+-  /**
+-   * Name of the target database. This can be `'main'` (the default primary database) or any other
+-   * database that have been added with [`ATTACH DATABASE`](https://www.sqlite.org/lang_attach.html)
+-   * @default 'main'
+-   */
+-  target?: string | undefined;
+-  /**
+-   * Number of pages to be transmitted in each batch of the backup.
+-   * @default 100
+-   */
+-  rate?: number | undefined;
+-  /**
+-   * Callback function that will be called with the number of pages copied and the total number of
+-   * pages.
+-   */
+-  progress?: ((progressInfo: BackupProgressInfo) => void) | undefined;
+-}
+-
+-interface BackupProgressInfo {
+-  totalPages: number;
+-  remainingPages: number;
+-}
+-
+-/**
+- * This method makes a database backup. This method abstracts the
+- * [`sqlite3_backup_init()`](https://www.sqlite.org/c3ref/backup_finish.html#sqlite3backupinit),
+- * [`sqlite3_backup_step()`](https://www.sqlite.org/c3ref/backup_finish.html#sqlite3backupstep)
+- * and [`sqlite3_backup_finish()`](https://www.sqlite.org/c3ref/backup_finish.html#sqlite3backupfinish) functions.
+- *
+- * The backed-up database can be used normally during the backup process. Mutations coming from the same connection - same
+- * `DatabaseSync` - object will be reflected in the backup right away. However, mutations from other connections will cause
+- * the backup process to restart.
+- *
+- * ```js
+- * import { backup, DatabaseSync } from 'node:sqlite';
+- *
+- * const sourceDb = new DatabaseSync('source.db');
+- * const totalPagesTransferred = await backup(sourceDb, 'backup.db', {
+- *   rate: 1, // Copy one page at a time.
+- *   progress: ({ totalPages, remainingPages }) => {
+- *     console.log('Backup in progress', { totalPages, remainingPages });
+- *   },
+- * });
+- *
+- * console.log('Backup completed', totalPagesTransferred);
+- * ```
+- * @param sourceDb The database to backup. The source database must be open.
+- * @param path The path where the backup will be created. If the file already exists,
+- * the contents will be overwritten.
+- * @param options Optional configuration for the backup. The
+- * following properties are supported:
+- * @returns A promise that resolves when the backup is completed and rejects if an error occurs.
+- */
+ // deno-lint-ignore require-await
+ async function backup(
+-  sourceDb: DatabaseSync,
+-  path: string | Buffer | URL,
+-  options?: BackupOptions,
+-): Promise<number> {
++  sourceDb,
++  path,
++  options,
++) {
+   if (!ObjectPrototypeIsPrototypeOf(DatabaseSync.prototype, sourceDb)) {
+     throw new InvalidArgTypeError(
+       'The "sourceDb" argument must be an object.',
+@@ -247,7 +185,7 @@ ObjectDefineProperty(backup, "length", {
+   writable: false,
+ });
+ 
+-export const constants = {
++const constants = {
+   SQLITE_CHANGESET_OMIT: 0,
+   SQLITE_CHANGESET_REPLACE: 1,
+   SQLITE_CHANGESET_ABORT: 2,
+@@ -298,7 +236,7 @@ export const constants = {
+ };
+ 
+ const sqliteTypeSymbol = SymbolFor("sqlite-type");
+-const limitsCache = new SafeWeakMap<object, object>();
++const limitsCache = new SafeWeakMap();
+ 
+ ObjectDefineProperties(DatabaseSync.prototype, {
+   [sqliteTypeSymbol]: {
+@@ -352,11 +290,10 @@ ObjectDefineProperties(Session.prototype, {
+   },
+ });
+ 
+-export { backup, DatabaseSync, StatementSync };
+-
+-export default {
++return {
+   backup,
+   constants,
+   DatabaseSync,
+   StatementSync,
+ };
++})();
+diff --git a/ext/node/polyfills/sqlite_esm.ts b/ext/node/polyfills/sqlite_esm.ts
+new file mode 100644
+index 00000000000000..7a790033e9241b
+--- /dev/null
++++ b/ext/node/polyfills/sqlite_esm.ts
+@@ -0,0 +1,12 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++import { core } from "ext:core/mod.js";
++const mod = core.loadExtScript("ext:deno_node/sqlite.ts");
++
++export const {
++  backup,
++  constants,
++  DatabaseSync,
++  StatementSync,
++} = mod;
++
++export default mod;
+
+From ef13039a18e518c291a2a73a32ed1ec1ae904a49 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 13:25:50 +0200
+Subject: [PATCH 2/2] fix: drop console and readline - their deps are in esm,
+ not lazy_loaded_js
+
+loadExtScript() can only resolve scripts from the lazy_loaded_js
+registry. _readline.mjs and internal/console/constructor.mjs are
+still in the esm section, so the snapshot build fails.
+
+Keep only node:sqlite whose deps (internal/util/types.ts,
+ext:deno_web/00_url.js) are already in lazy_loaded_js.
+---
+ ext/node/lib.rs                          |  6 ++--
+ ext/node/polyfills/01_require.js         |  4 +--
+ ext/node/polyfills/console.ts            | 42 ++++++++++++++++++------
+ ext/node/polyfills/console_esm.ts        | 32 ------------------
+ ext/node/polyfills/http2.ts              |  2 +-
+ ext/node/polyfills/internal/fs/handle.ts |  4 +--
+ ext/node/polyfills/readline.ts           | 20 +++++++----
+ ext/node/polyfills/readline_esm.ts       | 16 ---------
+ ext/node/polyfills/repl.ts               |  2 +-
+ 9 files changed, 54 insertions(+), 74 deletions(-)
+ delete mode 100644 ext/node/polyfills/console_esm.ts
+ delete mode 100644 ext/node/polyfills/readline_esm.ts
+
+diff --git a/ext/node/lib.rs b/ext/node/lib.rs
+index 14276453ba95d5..6231b062492e68 100644
+--- a/ext/node/lib.rs
++++ b/ext/node/lib.rs
+@@ -510,6 +510,7 @@ deno_core::extension!(deno_node,
+     "node:buffer" = "buffer.ts",
+     "node:child_process" = "child_process.ts",
+     "node:cluster" = "cluster.ts",
++    "node:console" = "console.ts",
+     "node:constants" = "constants.ts",
+     "node:crypto" = "crypto.ts",
+     "node:dgram" = "dgram.ts",
+@@ -529,6 +530,7 @@ deno_core::extension!(deno_node,
+     "node:path/posix" = "path/posix.ts",
+     "node:path/win32" = "path/win32.ts",
+     "node:process" = "process.ts",
++    "node:readline" = "readline.ts",
+     "node:readline/promises" = "readline/promises.ts",
+     "node:repl" = "repl.ts",
+     "node:stream" = "stream.ts",
+@@ -565,8 +567,6 @@ deno_core::extension!(deno_node,
+     "node:util/types" = "util/types.ts",
+     "node:vm" = "vm_esm.js",
+     "node:wasi" = "wasi_esm.ts",
+-    "node:console" = "console_esm.ts",
+-    "node:readline" = "readline_esm.ts",
+     "node:sqlite" = "sqlite_esm.ts",
+   ],
+   lazy_loaded_js = [
+@@ -671,8 +671,6 @@ deno_core::extension!(deno_node,
+     "trace_events.ts",
+     "vm.js",
+     "wasi.ts",
+-    "console.ts",
+-    "readline.ts",
+     "sqlite.ts",
+   ],
+   options = {
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 3b7514d90eb029..d9c60c1fd2cf0c 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -99,7 +99,7 @@ const {
+ import buffer from "node:buffer";
+ import childProcess from "node:child_process";
+ import cluster from "node:cluster";
+-const console = core.loadExtScript("ext:deno_node/console.ts");
++import console from "node:console";
+ import constants from "node:constants";
+ import crypto from "node:crypto";
+ import dgram from "node:dgram";
+@@ -179,7 +179,7 @@ const perfHooks = core.loadExtScript("ext:deno_node/perf_hooks.js").default;
+ const punycode = core.loadExtScript("ext:deno_node/punycode.ts").default;
+ import process from "node:process";
+ const querystring = core.loadExtScript("ext:deno_node/querystring.js").default;
+-const readline = core.loadExtScript("ext:deno_node/readline.ts");
++import readline from "node:readline";
+ import readlinePromises from "node:readline/promises";
+ import repl from "node:repl";
+ const sqlite = core.loadExtScript("ext:deno_node/sqlite.ts");
+diff --git a/ext/node/polyfills/console.ts b/ext/node/polyfills/console.ts
+index d503b506c39de9..1fb4ea981c97ec 100644
+--- a/ext/node/polyfills/console.ts
++++ b/ext/node/polyfills/console.ts
+@@ -1,13 +1,8 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-(function () {
+-const { core, primordials } = globalThis.__bootstrap;
+-const { Console } = core.loadExtScript(
+-  "ext:deno_node/internal/console/constructor.mjs",
+-);
+-const { windowOrWorkerGlobalScope } = core.loadExtScript(
+-  "ext:runtime/98_global_scope_shared.js",
+-);
++import { primordials } from "ext:core/mod.js";
++import { Console } from "ext:deno_node/internal/console/constructor.mjs";
++import { windowOrWorkerGlobalScope } from "ext:runtime/98_global_scope_shared.js";
+ // Don't rely on global `console` because during bootstrapping, it is pointing
+ // to native `console` object provided by V8.
+ const console = windowOrWorkerGlobalScope.console.value;
+@@ -16,5 +11,32 @@ const { ObjectAssign } = primordials;
+ 
+ ObjectAssign(console, { Console });
+ 
+-return console;
+-})();
++export default console;
++
++export { Console };
++export const {
++  assert,
++  clear,
++  count,
++  countReset,
++  debug,
++  dir,
++  dirxml,
++  error,
++  group,
++  groupCollapsed,
++  groupEnd,
++  info,
++  log,
++  profile,
++  profileEnd,
++  table,
++  time,
++  timeEnd,
++  timeLog,
++  timeStamp,
++  trace,
++  warn,
++} = console;
++// deno-lint-ignore no-explicit-any
++export const indentLevel = (console as any)?.indentLevel;
+diff --git a/ext/node/polyfills/console_esm.ts b/ext/node/polyfills/console_esm.ts
+deleted file mode 100644
+index e9e90eb3ce6504..00000000000000
+--- a/ext/node/polyfills/console_esm.ts
++++ /dev/null
+@@ -1,32 +0,0 @@
+-// Copyright 2018-2026 the Deno authors. MIT license.
+-import { core } from "ext:core/mod.js";
+-const mod = core.loadExtScript("ext:deno_node/console.ts");
+-
+-export const {
+-  Console,
+-  assert,
+-  clear,
+-  count,
+-  countReset,
+-  debug,
+-  dir,
+-  dirxml,
+-  error,
+-  group,
+-  groupCollapsed,
+-  groupEnd,
+-  info,
+-  log,
+-  profile,
+-  profileEnd,
+-  table,
+-  time,
+-  timeEnd,
+-  timeLog,
+-  timeStamp,
+-  trace,
+-  warn,
+-  indentLevel,
+-} = mod;
+-
+-export default mod;
+diff --git a/ext/node/polyfills/http2.ts b/ext/node/polyfills/http2.ts
+index 8c3d89fe208860..f0b96b88e2d8e0 100644
+--- a/ext/node/polyfills/http2.ts
++++ b/ext/node/polyfills/http2.ts
+@@ -232,7 +232,7 @@ const onServerStreamCloseChannel = dc.channel("http2.server.stream.close");
+ const { debuglog } = core.loadExtScript(
+   "ext:deno_node/internal/util/debuglog.ts",
+ );
+-const console = core.loadExtScript("ext:deno_node/console.ts");
++import console from "node:console";
+ let debug = debuglog("http2", (fn) => {
+   debug = fn;
+ });
+diff --git a/ext/node/polyfills/internal/fs/handle.ts b/ext/node/polyfills/internal/fs/handle.ts
+index ebbed17744976b..64394e2d752b33 100644
+--- a/ext/node/polyfills/internal/fs/handle.ts
++++ b/ext/node/polyfills/internal/fs/handle.ts
+@@ -19,8 +19,8 @@ import {
+   write as writeAsync,
+   WriteStream,
+ } from "node:fs";
+-const { createInterface } = core.loadExtScript("ext:deno_node/readline.ts");
+-type ReadlineInterface = import("node:readline").Interface;
++import { createInterface } from "node:readline";
++import type { Interface as ReadlineInterface } from "node:readline";
+ import { core, primordials } from "ext:core/mod.js";
+ import { op_node_fs_close } from "ext:core/ops";
+ import type {
+diff --git a/ext/node/polyfills/readline.ts b/ext/node/polyfills/readline.ts
+index 0a1d03178c3180..1b37232008e3a5 100644
+--- a/ext/node/polyfills/readline.ts
++++ b/ext/node/polyfills/readline.ts
+@@ -1,9 +1,7 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ // @deno-types="./_readline.d.ts"
+ 
+-(function () {
+-const { core } = globalThis.__bootstrap;
+-const {
++import {
+   clearLine,
+   clearScreenDown,
+   createInterface,
+@@ -12,9 +10,9 @@ const {
+   Interface,
+   moveCursor,
+   promises,
+-} = core.loadExtScript("ext:deno_node/_readline.mjs");
++} from "ext:deno_node/_readline.mjs";
+ 
+-return {
++export {
+   clearLine,
+   clearScreenDown,
+   createInterface,
+@@ -24,4 +22,14 @@ return {
+   moveCursor,
+   promises,
+ };
+-})();
++
++export default {
++  Interface,
++  clearLine,
++  clearScreenDown,
++  createInterface,
++  cursorTo,
++  emitKeypressEvents,
++  moveCursor,
++  promises,
++};
+diff --git a/ext/node/polyfills/readline_esm.ts b/ext/node/polyfills/readline_esm.ts
+deleted file mode 100644
+index 0384c7cf23c41d..00000000000000
+--- a/ext/node/polyfills/readline_esm.ts
++++ /dev/null
+@@ -1,16 +0,0 @@
+-// Copyright 2018-2026 the Deno authors. MIT license.
+-import { core } from "ext:core/mod.js";
+-const mod = core.loadExtScript("ext:deno_node/readline.ts");
+-
+-export const {
+-  clearLine,
+-  clearScreenDown,
+-  createInterface,
+-  cursorTo,
+-  emitKeypressEvents,
+-  Interface,
+-  moveCursor,
+-  promises,
+-} = mod;
+-
+-export default mod;
+diff --git a/ext/node/polyfills/repl.ts b/ext/node/polyfills/repl.ts
+index d7ca69ee7d2b26..8711d4987556cc 100644
+--- a/ext/node/polyfills/repl.ts
++++ b/ext/node/polyfills/repl.ts
+@@ -25,7 +25,7 @@ const vm = core.loadExtScript("ext:deno_node/vm.js").default;
+ import process from "node:process";
+ import path from "node:path";
+ import fs from "node:fs";
+-const { Console } = core.loadExtScript("ext:deno_node/console.ts");
++import { Console } from "node:console";
+ import Module from "node:module";
+ const { EventEmitter } = core.loadExtScript("ext:deno_node/_events.mjs");
+ 

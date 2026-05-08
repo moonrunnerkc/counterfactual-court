@@ -1,0 +1,654 @@
+From dcd485d8c2e29be234dcfd235294c2b0effbf173 Mon Sep 17 00:00:00 2001
+From: Denis Bezrukov <6227442+denbezrukov@users.noreply.github.com>
+Date: Wed, 6 May 2026 23:18:55 +0300
+Subject: [PATCH] feat(css_formatter): improve formatting SCSS function
+ arguments with trailing commas
+
+---
+ .../src/css/lists/parameter_list.rs           |  59 +++--
+ crates/biome_css_formatter/src/utils/mod.rs   |   1 -
+ .../src/utils/scss_separated_list.rs          |  11 -
+ .../function_arguments_trailing_commas.css    |  23 ++
+ ...unction_arguments_trailing_commas.css.snap |  63 ++++++
+ .../css/trailing-comma/var-func.css.snap      |  48 -----
+ .../specs/prettier/scss/map/3235.scss.snap    | 203 ------------------
+ .../function-arguments-in-values.scss         |  25 +++
+ .../function-arguments-in-values.scss.snap    |  89 ++++++++
+ 9 files changed, 242 insertions(+), 280 deletions(-)
+ delete mode 100644 crates/biome_css_formatter/src/utils/scss_separated_list.rs
+ create mode 100644 crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css
+ create mode 100644 crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css.snap
+ delete mode 100644 crates/biome_css_formatter/tests/specs/prettier/css/trailing-comma/var-func.css.snap
+ delete mode 100644 crates/biome_css_formatter/tests/specs/prettier/scss/map/3235.scss.snap
+ create mode 100644 crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss
+ create mode 100644 crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss.snap
+
+diff --git a/crates/biome_css_formatter/src/css/lists/parameter_list.rs b/crates/biome_css_formatter/src/css/lists/parameter_list.rs
+index 5912307a88a7..11f4c5b50ab7 100644
+--- a/crates/biome_css_formatter/src/css/lists/parameter_list.rs
++++ b/crates/biome_css_formatter/src/css/lists/parameter_list.rs
+@@ -2,21 +2,27 @@ use crate::prelude::*;
+ use crate::utils::scss_closing_comments::{
+     ClosingCommentSpacing, owns_include_closing_comments, write_include_closing_comments,
+ };
+-use crate::utils::scss_separated_list::trailing_separator_for_node;
+ use biome_css_syntax::{
+-    AnyCssExpression, CssParameterList, scss_keyword_argument_from_css_expression,
++    AnyCssExpression, CssFunction, CssParameterList, scss_keyword_argument_from_css_expression,
+ };
++use biome_formatter::separated::TrailingSeparator;
+ use biome_formatter::write;
+-use biome_rowan::AstSeparatedList;
++use biome_rowan::{AstNode, AstSeparatedList};
+ 
+ #[derive(Debug, Clone, Default)]
+ pub(crate) struct FormatCssParameterList;
+ impl FormatRule<CssParameterList> for FormatCssParameterList {
+     type Context = CssFormatContext;
+     fn fmt(&self, node: &CssParameterList, f: &mut CssFormatter) -> FormatResult<()> {
+-        let separated = node
+-            .format_separated(",")
+-            .with_trailing_separator(trailing_separator_for_node(node.syntax()));
++        let separated = node.format_separated(",").with_trailing_separator(
++            if is_var_function_empty_fallback(node) {
++                // `var(--name,)` uses the comma as an empty fallback marker.
++                TrailingSeparator::Mandatory
++            } else {
++                // Prettier removes call trailing commas: `fn(a,)` -> `fn(a)`.
++                TrailingSeparator::Omit
++            },
++        );
+ 
+         let mut is_first = true;
+         let mut previous_was_keyword_argument = false;
+@@ -26,8 +32,13 @@ impl FormatRule<CssParameterList> for FormatCssParameterList {
+ 
+             if is_first {
+                 is_first = false;
++            } else if should_preserve_blank_line_before_parameter(
++                element_node,
++                previous_was_keyword_argument,
++            ) {
++                write!(f, [empty_line()])?;
+             } else {
+-                write_parameter_separator(element_node, previous_was_keyword_argument, f)?;
++                write!(f, [soft_line_break_or_space()])?;
+             }
+ 
+             write!(f, [formatted])?;
+@@ -49,18 +60,27 @@ impl FormatRule<CssParameterList> for FormatCssParameterList {
+     }
+ }
+ 
+-fn write_parameter_separator(
+-    parameter: Option<&AnyCssExpression>,
+-    previous_was_keyword_argument: bool,
+-    f: &mut CssFormatter,
+-) -> FormatResult<()> {
+-    if should_preserve_blank_line_before_parameter(parameter, previous_was_keyword_argument) {
+-        write!(f, [empty_line()])
+-    } else {
+-        write!(f, [soft_line_break_or_space()])
+-    }
++/// Returns true for `var()` with a source trailing comma.
++///
++/// CSS uses the comma as an empty fallback marker: `var(--name,)`.
++fn is_var_function_empty_fallback(node: &CssParameterList) -> bool {
++    node.trailing_separator().is_some() && is_var_function_parameter_list(node)
++}
++
++/// Checks whether this parameter list belongs directly to a `var(...)` call.
++fn is_var_function_parameter_list(node: &CssParameterList) -> bool {
++    node.parent::<CssFunction>()
++        .and_then(|function| function.name().ok())
++        .and_then(|name| {
++            name.as_css_identifier()
++                .and_then(|name| name.value_token().ok())
++        })
++        .is_some_and(|token| token.text_trimmed().eq_ignore_ascii_case("var"))
+ }
+ 
++/// Keeps a blank line after SCSS keyword parameters.
++///
++/// Example: `foo($a: 1,\n\n$b: 2)` keeps the empty line before `$b`.
+ fn should_preserve_blank_line_before_parameter(
+     parameter: Option<&AnyCssExpression>,
+     previous_was_keyword_argument: bool,
+@@ -69,10 +89,14 @@ fn should_preserve_blank_line_before_parameter(
+         && parameter.is_some_and(|node| get_lines_before(node.syntax()) > 1)
+ }
+ 
++/// Detects SCSS keyword parameters such as `$color: red`.
+ fn is_scss_keyword_parameter(parameter: Option<&AnyCssExpression>) -> bool {
+     parameter.is_some_and(|node| scss_keyword_argument_from_css_expression(node).is_some())
+ }
+ 
++/// Keeps a closing line comment attached to a final SCSS spread argument.
++///
++/// Example: `@include mix($args... // comment\n)`.
+ fn should_inline_arbitrary_argument_closing_comment(
+     node: &CssParameterList,
+     f: &CssFormatter,
+@@ -87,6 +111,7 @@ fn should_inline_arbitrary_argument_closing_comment(
+         })
+ }
+ 
++/// Returns true when an expression ends with a SCSS spread argument: `$args...`.
+ fn expression_ends_with_arbitrary_argument(node: &AnyCssExpression) -> bool {
+     node.as_scss_expression()
+         .and_then(|expression| expression.items().iter().last())
+diff --git a/crates/biome_css_formatter/src/utils/mod.rs b/crates/biome_css_formatter/src/utils/mod.rs
+index 64a844366ba8..e416523b658f 100644
+--- a/crates/biome_css_formatter/src/utils/mod.rs
++++ b/crates/biome_css_formatter/src/utils/mod.rs
+@@ -12,6 +12,5 @@ pub(crate) mod scss_keyword_argument_layout;
+ pub(crate) mod scss_list_layout;
+ pub(crate) mod scss_map_layout;
+ pub(crate) mod scss_module_configuration;
+-pub(crate) mod scss_separated_list;
+ pub(crate) mod scss_separator_comments;
+ pub(crate) mod string_utils;
+diff --git a/crates/biome_css_formatter/src/utils/scss_separated_list.rs b/crates/biome_css_formatter/src/utils/scss_separated_list.rs
+deleted file mode 100644
+index ce81f3460809..000000000000
+--- a/crates/biome_css_formatter/src/utils/scss_separated_list.rs
++++ /dev/null
+@@ -1,11 +0,0 @@
+-use biome_css_syntax::{CssSyntaxNode, is_in_scss_include_arguments};
+-use biome_formatter::separated::TrailingSeparator;
+-
+-/// Chooses the trailing separator policy for SCSS-aware separated lists.
+-pub(crate) fn trailing_separator_for_node(node: &CssSyntaxNode) -> TrailingSeparator {
+-    if is_in_scss_include_arguments(node) {
+-        TrailingSeparator::Omit
+-    } else {
+-        TrailingSeparator::Disallowed
+-    }
+-}
+diff --git a/crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css b/crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css
+new file mode 100644
+index 000000000000..1a2d0c3ef176
+--- /dev/null
++++ b/crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css
+@@ -0,0 +1,23 @@
++a {
++  transition-timing-function: func1(
++      func2(
++          func3(
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++          ),
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++      ),
++      "veryVeryVeryVeryVeryLongValue",
++      "veryVeryVeryVeryVeryLongValue",
++      func3(
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue"
++      )
++  );
++}
+diff --git a/crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css.snap b/crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css.snap
+new file mode 100644
+index 000000000000..20d3248122c0
+--- /dev/null
++++ b/crates/biome_css_formatter/tests/specs/css/function_arguments_trailing_commas.css.snap
+@@ -0,0 +1,63 @@
++---
++source: crates/biome_formatter_test/src/snapshot_builder.rs
++info: css/function_arguments_trailing_commas.css
++---
++
++# Input
++
++```css
++a {
++  transition-timing-function: func1(
++      func2(
++          func3(
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++          ),
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++      ),
++      "veryVeryVeryVeryVeryLongValue",
++      "veryVeryVeryVeryVeryLongValue",
++      func3(
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue"
++      )
++  );
++}
++
++```
++
++
++# Formatted
++
++```css
++a {
++	transition-timing-function: func1(
++		func2(
++			func3(
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue"
++			),
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue"
++		),
++		"veryVeryVeryVeryVeryLongValue",
++		"veryVeryVeryVeryVeryLongValue",
++		func3(
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue"
++		)
++	);
++}
++
++```
+diff --git a/crates/biome_css_formatter/tests/specs/prettier/css/trailing-comma/var-func.css.snap b/crates/biome_css_formatter/tests/specs/prettier/css/trailing-comma/var-func.css.snap
+deleted file mode 100644
+index 3806d551b474..000000000000
+--- a/crates/biome_css_formatter/tests/specs/prettier/css/trailing-comma/var-func.css.snap
++++ /dev/null
+@@ -1,48 +0,0 @@
+----
+-source: crates/biome_formatter_test/src/snapshot_builder.rs
+-info: css/trailing-comma/var-func.css
+----
+-
+-# Input
+-
+-```css
+-.foo {
+-	--bar: var(--baz,);
+-  --bar: var(--baz     ,);
+-  --bar: var(--baz     ,    );
+-  --bar: var(--baz,);
+-	--bar: var(   --baz1, --baz2    , );
+-}
+-
+-```
+-
+-
+-# Prettier differences
+-
+-```diff
+---- Prettier
+-+++ Biome
+-@@ -1,7 +1,7 @@
+- .foo {
+-   --bar: var(--baz,);
+-+  --bar: var(--baz     ,);
+-+  --bar: var(--baz     ,    );
+-   --bar: var(--baz,);
+--  --bar: var(--baz,);
+--  --bar: var(--baz,);
+--  --bar: var(--baz1, --baz2,);
+-+  --bar: var(   --baz1, --baz2    , );
+- }
+-```
+-
+-# Output
+-
+-```css
+-.foo {
+-  --bar: var(--baz,);
+-  --bar: var(--baz     ,);
+-  --bar: var(--baz     ,    );
+-  --bar: var(--baz,);
+-  --bar: var(   --baz1, --baz2    , );
+-}
+-```
+diff --git a/crates/biome_css_formatter/tests/specs/prettier/scss/map/3235.scss.snap b/crates/biome_css_formatter/tests/specs/prettier/scss/map/3235.scss.snap
+deleted file mode 100644
+index c157c4358768..000000000000
+--- a/crates/biome_css_formatter/tests/specs/prettier/scss/map/3235.scss.snap
++++ /dev/null
+@@ -1,203 +0,0 @@
+----
+-source: crates/biome_formatter_test/src/snapshot_builder.rs
+-info: scss/map/3235.scss
+----
+-
+-# Input
+-
+-```scss
+-a {
+-  transition-timing-function: func1(
+-      func2(
+-          func3(
+-              "veryVeryVeryVeryVeryLongValue",
+-              "veryVeryVeryVeryVeryLongValue",
+-              "veryVeryVeryVeryVeryLongValue",
+-              "veryVeryVeryVeryVeryLongValue",
+-          ),
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-      ),
+-      "veryVeryVeryVeryVeryLongValue",
+-      "veryVeryVeryVeryVeryLongValue",
+-      func3(
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue"
+-      )
+-  );
+-}
+-
+-$empty-map: ();
+-$empty-nested-map: (
+-nested-key: (empty-key: (color: red)),
+-empty-key: (),
+-empty-key: (),
+-empty-key: ()
+-);
+-
+-$o-grid-default-config: (
+-columns: 12,
+-gutter: 10px,
+-min-width: 240px,
+-max-width: 1330px,
+-layouts: (
+-S:  370px,
+-M:  610px,
+-L:  850px,
+-XL: 1090px
+-),
+-fluid: true,
+-debug: false,
+-fixed-layout: M,
+-enhanced-experience: true
+-);
+-
+-$a: ();
+-$b: unquote('');
+-$c: null;
+-$d: (null);
+-
+-$threads-properties: map-merge($threads-properties,  ($border-label: ()));
+-$o-grid-default-config: (layouts: (S:  370px));
+-
+-$map: (
+-key: (value),
+-other-key: (key: other-other-value)
+-);
+-
+-```
+-
+-
+-# Prettier differences
+-
+-```diff
+---- Prettier
+-+++ Biome
+-@@ -1,24 +1,24 @@
+- a {
+-   transition-timing-function: func1(
+--    func2(
+--      func3(
+--        "veryVeryVeryVeryVeryLongValue",
+--        "veryVeryVeryVeryVeryLongValue",
+--        "veryVeryVeryVeryVeryLongValue",
+--        "veryVeryVeryVeryVeryLongValue"
+-+      func2(
+-+          func3(
+-+              "veryVeryVeryVeryVeryLongValue",
+-+              "veryVeryVeryVeryVeryLongValue",
+-+              "veryVeryVeryVeryVeryLongValue",
+-+              "veryVeryVeryVeryVeryLongValue",
+-+          ),
+-+          "veryVeryVeryVeryVeryLongValue",
+-+          "veryVeryVeryVeryVeryLongValue",
+-+          "veryVeryVeryVeryVeryLongValue",
+-       ),
+-       "veryVeryVeryVeryVeryLongValue",
+-       "veryVeryVeryVeryVeryLongValue",
+--      "veryVeryVeryVeryVeryLongValue"
+--    ),
+--    "veryVeryVeryVeryVeryLongValue",
+--    "veryVeryVeryVeryVeryLongValue",
+--    func3(
+--      "veryVeryVeryVeryVeryLongValue",
+--      "veryVeryVeryVeryVeryLongValue",
+--      "veryVeryVeryVeryVeryLongValue",
+--      "veryVeryVeryVeryVeryLongValue"
+--    )
+-+      func3(
+-+          "veryVeryVeryVeryVeryLongValue",
+-+          "veryVeryVeryVeryVeryLongValue",
+-+          "veryVeryVeryVeryVeryLongValue",
+-+          "veryVeryVeryVeryVeryLongValue"
+-+      )
+-   );
+- }
+- 
+-```
+-
+-# Output
+-
+-```scss
+-a {
+-  transition-timing-function: func1(
+-      func2(
+-          func3(
+-              "veryVeryVeryVeryVeryLongValue",
+-              "veryVeryVeryVeryVeryLongValue",
+-              "veryVeryVeryVeryVeryLongValue",
+-              "veryVeryVeryVeryVeryLongValue",
+-          ),
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-      ),
+-      "veryVeryVeryVeryVeryLongValue",
+-      "veryVeryVeryVeryVeryLongValue",
+-      func3(
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue",
+-          "veryVeryVeryVeryVeryLongValue"
+-      )
+-  );
+-}
+-
+-$empty-map: ();
+-$empty-nested-map: (
+-  nested-key: (
+-    empty-key: (
+-      color: red,
+-    ),
+-  ),
+-  empty-key: (),
+-  empty-key: (),
+-  empty-key: (),
+-);
+-
+-$o-grid-default-config: (
+-  columns: 12,
+-  gutter: 10px,
+-  min-width: 240px,
+-  max-width: 1330px,
+-  layouts: (
+-    S: 370px,
+-    M: 610px,
+-    L: 850px,
+-    XL: 1090px,
+-  ),
+-  fluid: true,
+-  debug: false,
+-  fixed-layout: M,
+-  enhanced-experience: true,
+-);
+-
+-$a: ();
+-$b: unquote("");
+-$c: null;
+-$d: (null);
+-
+-$threads-properties: map-merge(
+-  $threads-properties,
+-  (
+-    $border-label: (),
+-  )
+-);
+-$o-grid-default-config: (
+-  layouts: (
+-    S: 370px,
+-  ),
+-);
+-
+-$map: (
+-  key: (
+-    value,
+-  ),
+-  other-key: (
+-    key: other-other-value,
+-  ),
+-);
+-```
+diff --git a/crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss b/crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss
+new file mode 100644
+index 000000000000..55357dca2419
+--- /dev/null
++++ b/crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss
+@@ -0,0 +1,25 @@
++a{transition-timing-function:func1(func2(func3("veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue"),"veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue"),"veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue",func3("veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue"));}
++
++a {
++  transition-timing-function: func1(
++      func2(
++          func3(
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++          ),
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++      ),
++      "veryVeryVeryVeryVeryLongValue",
++      "veryVeryVeryVeryVeryLongValue",
++      func3(
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue"
++      )
++  );
++}
+diff --git a/crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss.snap b/crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss.snap
+new file mode 100644
+index 000000000000..c2c28bea9af7
+--- /dev/null
++++ b/crates/biome_css_formatter/tests/specs/scss/expression/function-arguments-in-values.scss.snap
+@@ -0,0 +1,89 @@
++---
++source: crates/biome_formatter_test/src/snapshot_builder.rs
++info: scss/expression/function-arguments-in-values.scss
++---
++
++# Input
++
++```scss
++a{transition-timing-function:func1(func2(func3("veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue"),"veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue"),"veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue",func3("veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue","veryVeryVeryVeryVeryLongValue"));}
++
++a {
++  transition-timing-function: func1(
++      func2(
++          func3(
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++              "veryVeryVeryVeryVeryLongValue",
++          ),
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++      ),
++      "veryVeryVeryVeryVeryLongValue",
++      "veryVeryVeryVeryVeryLongValue",
++      func3(
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue",
++          "veryVeryVeryVeryVeryLongValue"
++      )
++  );
++}
++
++```
++
++
++# Formatted
++
++```scss
++a {
++	transition-timing-function: func1(
++		func2(
++			func3(
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue"
++			),
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue"
++		),
++		"veryVeryVeryVeryVeryLongValue",
++		"veryVeryVeryVeryVeryLongValue",
++		func3(
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue"
++		)
++	);
++}
++
++a {
++	transition-timing-function: func1(
++		func2(
++			func3(
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue",
++				"veryVeryVeryVeryVeryLongValue"
++			),
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue"
++		),
++		"veryVeryVeryVeryVeryLongValue",
++		"veryVeryVeryVeryVeryLongValue",
++		func3(
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue",
++			"veryVeryVeryVeryVeryLongValue"
++		)
++	);
++}
++
++```

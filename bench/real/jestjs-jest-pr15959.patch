@@ -1,0 +1,214 @@
+From b89cd6487c727b787de3a2669ff5e3c3c38bad63 Mon Sep 17 00:00:00 2001
+From: Jamie Magee <jamie.magee@gmail.com>
+Date: Sat, 14 Feb 2026 21:05:34 -0800
+Subject: [PATCH] fix(expect-utils): handle cross-realm constructors in
+ toStrictEqual
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+structuredClone returns objects whose constructors come from the outer
+VM context. typeEquality and iterableEquality compared constructors by
+identity (===), which always failed across realms — even for plain
+objects, Maps, Sets, Dates, and RegExps.
+
+When constructors don't match by identity, fall back to comparing
+constructor names, but only when both are native built-in functions.
+User-defined classes still require identity equality, so toStrictEqual
+keeps distinguishing e.g. two different classes named Child.
+
+Fixes #14011
+---
+ CHANGELOG.md                                  |  4 +
+ .../expect-utils/src/__tests__/tsconfig.json  |  3 +
+ .../expect-utils/src/__tests__/utils.test.ts  | 82 +++++++++++++++++++
+ packages/expect-utils/src/utils.ts            | 35 +++++++-
+ 4 files changed, 123 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d316027af684..34a36f46bd54 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,9 @@
+ ## main
+ 
++### Fixes
++
++- `[expect-utils]` Fix `toStrictEqual` failing on `structuredClone` results due to cross-realm constructor mismatch ([#14011](https://github.com/jestjs/jest/issues/14011))
++
+ ## 30.3.0
+ 
+ ### Features
+diff --git a/packages/expect-utils/src/__tests__/tsconfig.json b/packages/expect-utils/src/__tests__/tsconfig.json
+index dd1bca103251..bd70e44378a8 100644
+--- a/packages/expect-utils/src/__tests__/tsconfig.json
++++ b/packages/expect-utils/src/__tests__/tsconfig.json
+@@ -1,5 +1,8 @@
+ {
+   "extends": "../../../../tsconfig.test.json",
+   "include": ["./**/*"],
++  "compilerOptions": {
++    "types": ["node", "@jest/test-globals"]
++  },
+   "references": [{"path": "../../"}]
+ }
+diff --git a/packages/expect-utils/src/__tests__/utils.test.ts b/packages/expect-utils/src/__tests__/utils.test.ts
+index 336f762f690f..dd55dcc0e647 100644
+--- a/packages/expect-utils/src/__tests__/utils.test.ts
++++ b/packages/expect-utils/src/__tests__/utils.test.ts
+@@ -8,6 +8,7 @@
+ 
+ import {List, OrderedMap, OrderedSet, Record} from 'immutable';
+ import {stringify} from 'jest-matcher-utils';
++import {createContext, runInContext} from 'vm';
+ import {equals} from '../jasmineUtils';
+ import {
+   arrayBufferEquality,
+@@ -658,6 +659,87 @@ describe('typeEquality', () => {
+   test('returns undefined if given mock.calls and []', () => {
+     expect(typeEquality(jest.fn().mock.calls, [])).toBeUndefined();
+   });
++
++  test('returns undefined for cross-realm plain objects', () => {
++    const context = createContext({});
++    const otherRealmObject = runInContext('({key: "test"})', context);
++    expect(typeEquality(otherRealmObject, {key: 'test'})).toBeUndefined();
++  });
++
++  test('returns undefined for cross-realm Maps', () => {
++    const context = createContext({});
++    const otherRealmMap = runInContext('new Map([["key", "value"]])', context);
++    expect(
++      typeEquality(otherRealmMap, new Map([['key', 'value']])),
++    ).toBeUndefined();
++  });
++
++  test('returns undefined for cross-realm Sets', () => {
++    const context = createContext({});
++    const otherRealmSet = runInContext('new Set(["test"])', context);
++    expect(typeEquality(otherRealmSet, new Set(['test']))).toBeUndefined();
++  });
++
++  test('returns undefined for cross-realm Dates', () => {
++    const context = createContext({});
++    const otherRealmDate = runInContext('new Date("2023-01-01")', context);
++    expect(
++      typeEquality(otherRealmDate, new Date('2023-01-01')),
++    ).toBeUndefined();
++  });
++
++  test('returns undefined for cross-realm RegExps', () => {
++    const context = createContext({});
++    const otherRealmRegExp = runInContext('/test/gi', context);
++    expect(typeEquality(otherRealmRegExp, /test/gi)).toBeUndefined();
++  });
++
++  test('returns false for different user-defined classes with same name', () => {
++    class Child {
++      a: number;
++      constructor(a: number) {
++        this.a = a;
++      }
++    }
++    const OtherChild = class Child {
++      a: number;
++      constructor(a: number) {
++        this.a = a;
++      }
++    };
++    expect(typeEquality(new Child(1), new OtherChild(1))).toBe(false);
++  });
++});
++
++describe('iterableEquality (cross-realm)', () => {
++  test('returns true for cross-realm Sets with same values', () => {
++    const context = createContext({});
++    const otherRealmSet = runInContext('new Set([1, 2, 3])', context);
++    expect(iterableEquality(otherRealmSet, new Set([1, 2, 3]))).toBe(true);
++  });
++
++  test('returns true for cross-realm Maps with same entries', () => {
++    const context = createContext({});
++    const otherRealmMap = runInContext(
++      'new Map([["a", 1], ["b", 2]])',
++      context,
++    );
++    expect(
++      iterableEquality(
++        otherRealmMap,
++        new Map([
++          ['a', 1],
++          ['b', 2],
++        ]),
++      ),
++    ).toBe(true);
++  });
++
++  test('returns false for cross-realm Sets with different values', () => {
++    const context = createContext({});
++    const otherRealmSet = runInContext('new Set([1, 2])', context);
++    expect(iterableEquality(otherRealmSet, new Set([1, 2, 3]))).toBe(false);
++  });
+ });
+ 
+ describe('arrayBufferEquality', () => {
+diff --git a/packages/expect-utils/src/utils.ts b/packages/expect-utils/src/utils.ts
+index 5a647281f630..5cb04d72447d 100644
+--- a/packages/expect-utils/src/utils.ts
++++ b/packages/expect-utils/src/utils.ts
+@@ -193,7 +193,17 @@ export const iterableEquality = (
+     return undefined;
+   }
+   if (a.constructor !== b.constructor) {
+-    return false;
++    // Same cross-realm constructor check as typeEquality — see #14011.
++    // https://github.com/jestjs/jest/issues/14011
++    if (
++      a.constructor == null ||
++      b.constructor == null ||
++      a.constructor.name !== b.constructor.name ||
++      !isNativeFunction(a.constructor) ||
++      !isNativeFunction(b.constructor)
++    ) {
++      return false;
++    }
+   }
+   let length = aStack.length;
+   while (length--) {
+@@ -392,6 +402,14 @@ export const subsetEquality = (
+   return subsetEqualityWithContext()(object, subset);
+ };
+ 
++// Returns true if `fn` is a native function (its toString contains "[native code]").
++function isNativeFunction(fn: unknown): boolean {
++  return (
++    typeof fn === 'function' &&
++    Function.prototype.toString.call(fn).includes('[native code]')
++  );
++}
++
+ // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
+ export const typeEquality = (a: any, b: any): boolean | undefined => {
+   if (
+@@ -407,6 +425,21 @@ export const typeEquality = (a: any, b: any): boolean | undefined => {
+     return undefined;
+   }
+ 
++  // structuredClone (and other cross-realm calls) return objects whose
++  // constructors come from a different VM context, so identity checks fail.
++  // Fall back to comparing constructor names for native built-ins only —
++  // user-defined classes still need identity equality.
++  // https://github.com/jestjs/jest/issues/14011
++  if (
++    a.constructor != null &&
++    b.constructor != null &&
++    a.constructor.name === b.constructor.name &&
++    isNativeFunction(a.constructor) &&
++    isNativeFunction(b.constructor)
++  ) {
++    return undefined;
++  }
++
+   return false;
+ };
+ 

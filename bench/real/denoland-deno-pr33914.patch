@@ -1,0 +1,223 @@
+From c87dc6e79f95363753ac7eec655ad6e3fc000596 Mon Sep 17 00:00:00 2001
+From: Nathan Whitaker <nathan@deno.com>
+Date: Thu, 7 May 2026 11:09:49 -0700
+Subject: [PATCH] fix(ext/node): drive TLSWrap cycle on JSStream writes to fix
+ deadlock
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+For JS-backed streams (TLSSocket wrapping a non-net.Socket Duplex, the
+mssql/tedious pattern), enc_write_cb (the libuv write completion path)
+never fires, so cycle() — the only path that fires InvokeQueued for
+queued cleartext WriteWraps — was only driven indirectly via peer reads.
+If the writer awaited each cb before the next chunk and the peer waited
+for all chunks before responding, the second cb never fired and the
+connection deadlocked.
+
+Mirror Node`s TLSWrap::EncOut + OnStreamAfterWrite loop: pump encrypted
+bytes to the underlying Duplex, wait for its _write callback, then drive
+cycle() (the ClearIn + EncOut analog) to push more cleartext, write more
+encrypted bytes if produced, and fire InvokeQueued. Gating cycle() on
+the underlying _write callback also propagates backpressure.
+
+Fixes #33907.
+---
+ .../polyfills/internal_binding/tls_wrap.ts    |  44 ++++++--
+ .../__test__.jsonc                            |   8 ++
+ .../tls_jsstreamsocket_multi_write/main.out   |   1 +
+ .../tls_jsstreamsocket_multi_write/main.ts    | 100 ++++++++++++++++++
+ 4 files changed, 142 insertions(+), 11 deletions(-)
+ create mode 100644 tests/specs/node/tls_jsstreamsocket_multi_write/__test__.jsonc
+ create mode 100644 tests/specs/node/tls_jsstreamsocket_multi_write/main.out
+ create mode 100644 tests/specs/node/tls_jsstreamsocket_multi_write/main.ts
+
+diff --git a/ext/node/polyfills/internal_binding/tls_wrap.ts b/ext/node/polyfills/internal_binding/tls_wrap.ts
+index 70947492243783..8f8d01cf9b7597 100644
+--- a/ext/node/polyfills/internal_binding/tls_wrap.ts
++++ b/ext/node/polyfills/internal_binding/tls_wrap.ts
+@@ -65,24 +65,46 @@ function wrap(
+     // Pull-based encrypted output: instead of Rust calling a JS
+     // callback (which causes reentrancy issues), Rust buffers encrypted
+     // data and JS drains it after each operation that may produce output.
+-    // The flush is scheduled via Promise.resolve().then() to avoid
+-    // synchronous feedback loops through DuplexPair.
++    //
++    // The pump mirrors Node's TLSWrap::EncOut + OnStreamAfterWrite loop
++    // (src/crypto/crypto_tls.cc): hand encrypted bytes to the underlying
++    // stream, wait for that write to complete, then drive cycle() (the
++    // ClearIn + EncOut analog) to push any remaining cleartext, write
++    // more encrypted bytes if produced, and finally fire InvokeQueued for
++    // the cleartext WriteWrap's oncomplete. For JS-backed streams there
++    // is no enc_write_cb (libuv write completion) so cycle() is only
++    // driven here; without it the cleartext write callback never fires
++    // and writes deadlock (issue #33907). Gating cycle() on the
++    // underlying Duplex's _write callback also propagates backpressure,
++    // matching Node's behavior.
+     const jsStreamOwner = nativeHandle[kOwner];
+     let flushPending = false;
++    let writeInFlight = false;
++    const pump = () => {
++      if (writeInFlight || !jsStreamOwner?.stream) return;
++      let data = res.drainEncOut();
++      if (!data || data.byteLength === 0) {
++        // No buffered encrypted output. Drive cycle() to fire
++        // InvokeQueued for any queued cleartext write and to produce
++        // more encrypted output if clear_in() was rate-limited.
++        res.readBuffer(new Uint8Array(0));
++        data = res.drainEncOut();
++        if (!data || data.byteLength === 0) return;
++      }
++      writeInFlight = true;
++      jsStreamOwner.stream.write(new Uint8Array(data), () => {
++        writeInFlight = false;
++        pump();
++      });
++    };
+     const flushEncOut = () => {
+       if (flushPending) return;
+       flushPending = true;
++      // Defer to a microtask so synchronous feedback loops through
++      // DuplexPair don't reenter cycle() while it's still running.
+       Promise.resolve().then(() => {
+         flushPending = false;
+-        let data;
+-        // Drain in a loop - writing to DuplexPair may trigger readBuffer
+-        // on the other side, which produces more encrypted output.
+-        while (
+-          (data = res.drainEncOut()) && data.byteLength > 0 &&
+-          jsStreamOwner?.stream
+-        ) {
+-          jsStreamOwner.stream.write(new Uint8Array(data));
+-        }
++        pump();
+       });
+     };
+ 
+diff --git a/tests/specs/node/tls_jsstreamsocket_multi_write/__test__.jsonc b/tests/specs/node/tls_jsstreamsocket_multi_write/__test__.jsonc
+new file mode 100644
+index 00000000000000..60a98449f8d354
+--- /dev/null
++++ b/tests/specs/node/tls_jsstreamsocket_multi_write/__test__.jsonc
+@@ -0,0 +1,8 @@
++{
++  "tests": {
++    "tls_jsstreamsocket_multi_write": {
++      "args": "run --allow-all main.ts",
++      "output": "main.out"
++    }
++  }
++}
+diff --git a/tests/specs/node/tls_jsstreamsocket_multi_write/main.out b/tests/specs/node/tls_jsstreamsocket_multi_write/main.out
+new file mode 100644
+index 00000000000000..19f86f493ab110
+--- /dev/null
++++ b/tests/specs/node/tls_jsstreamsocket_multi_write/main.out
+@@ -0,0 +1 @@
++done
+diff --git a/tests/specs/node/tls_jsstreamsocket_multi_write/main.ts b/tests/specs/node/tls_jsstreamsocket_multi_write/main.ts
+new file mode 100644
+index 00000000000000..aa842df0aac149
+--- /dev/null
++++ b/tests/specs/node/tls_jsstreamsocket_multi_write/main.ts
+@@ -0,0 +1,100 @@
++// Regression test for https://github.com/denoland/deno/issues/33907
++//
++// When TLSSocket wraps a non-net.Socket Duplex stream (the mssql/tedious
++// pattern), JSStreamSocket is used. The cleartext write callback (the `cb`
++// passed to TLSSocket._write) only fires after InvokeQueued runs in Rust.
++// For native UV streams that happens in `enc_write_cb` (libuv write
++// completion). For JS-backed streams there is no `enc_write_cb`, so the
++// callback was only fired indirectly when peer data arrived (via cycle()).
++//
++// If the writer awaits each cb before sending the next chunk, and the
++// peer waits for all chunks before responding (e.g. TDS packetized
++// parameter data), the second chunk's write callback never fires, the
++// writable stream stays paused, and the connection deadlocks.
++
++import tls from "node:tls";
++import net from "node:net";
++import { readFileSync } from "node:fs";
++import { Duplex } from "node:stream";
++
++const cert = readFileSync(
++  new URL("../../../testdata/tls/localhost.crt", import.meta.url),
++);
++const key = readFileSync(
++  new URL("../../../testdata/tls/localhost.key", import.meta.url),
++);
++
++const CHUNK_SIZE = 4096;
++const NUM_CHUNKS = 5;
++const TOTAL_BYTES = CHUNK_SIZE * NUM_CHUNKS;
++
++const server = tls.createServer({ cert, key }, (socket) => {
++  let received = 0;
++  socket.on("data", (chunk: Buffer) => {
++    received += chunk.length;
++    if (received >= TOTAL_BYTES) {
++      socket.write("ok");
++    }
++  });
++  socket.on("error", () => {});
++  socket.on("end", () => socket.end());
++});
++
++server.listen(0, async () => {
++  const { port } = server.address() as { port: number };
++
++  const rawSocket = net.connect(port, "localhost", () => {});
++
++  // Plain Duplex (NOT a net.Socket) - drives JSStreamSocket in _tls_wrap.js.
++  const wrapper = new Duplex({
++    read() {},
++    write(chunk: Buffer, _enc: string, cb: () => void) {
++      if (rawSocket.destroyed) {
++        cb();
++        return;
++      }
++      rawSocket.write(chunk, cb);
++    },
++  });
++  rawSocket.on("data", (d: Buffer) => wrapper.push(d));
++  rawSocket.on("end", () => wrapper.push(null));
++
++  const tlsSocket = tls.connect({
++    socket: wrapper,
++    rejectUnauthorized: false,
++  });
++  tlsSocket.on("error", () => {});
++
++  const writeChunk = (data: Buffer) =>
++    new Promise<void>((resolve, reject) => {
++      tlsSocket.write(data, (err) => err ? reject(err) : resolve());
++    });
++
++  const timeout = setTimeout(() => {
++    console.log("DEADLOCK");
++    Deno.exit(1);
++  }, 10000);
++
++  await new Promise<void>((resolve) =>
++    tlsSocket.once("secureConnect", resolve)
++  );
++
++  const ack = new Promise<void>((resolve) => {
++    tlsSocket.on("data", (d: Buffer) => {
++      if (d.toString() === "ok") resolve();
++    });
++  });
++
++  // Await each chunk's cb before sending the next. The deadlock manifests
++  // when the second cb never fires.
++  for (let i = 0; i < NUM_CHUNKS; i++) {
++    await writeChunk(Buffer.alloc(CHUNK_SIZE, "x"));
++  }
++
++  await ack;
++  clearTimeout(timeout);
++  console.log("done");
++  tlsSocket.destroy();
++  rawSocket.destroy();
++  server.close();
++});

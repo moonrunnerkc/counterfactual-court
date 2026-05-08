@@ -1,0 +1,132 @@
+From bf8a5b290fbced60e3e41adb21caff78497aaf5e Mon Sep 17 00:00:00 2001
+From: silverwind <me@silverwind.io>
+Date: Wed, 28 Jun 2023 19:31:37 +0200
+Subject: [PATCH 1/2] Update `supports-color` to 9.4.0
+
+Produced via `cp ../supports-color/{index,browser}.{js,d.ts} source/vendor/supports-color`
+---
+ source/vendor/supports-color/browser.js | 2 +-
+ source/vendor/supports-color/index.d.ts | 8 ++++----
+ source/vendor/supports-color/index.js   | 3 ++-
+ 3 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/source/vendor/supports-color/browser.js b/source/vendor/supports-color/browser.js
+index 9fa6888f..1ffde642 100644
+--- a/source/vendor/supports-color/browser.js
++++ b/source/vendor/supports-color/browser.js
+@@ -3,7 +3,7 @@
+ const level = (() => {
+ 	if (navigator.userAgentData) {
+ 		const brand = navigator.userAgentData.brands.find(({brand}) => brand === 'Chromium');
+-		if (brand && brand.version > 93) {
++		if (brand?.version > 93) {
+ 			return 3;
+ 		}
+ 	}
+diff --git a/source/vendor/supports-color/index.d.ts b/source/vendor/supports-color/index.d.ts
+index db44a785..9cab8d1d 100644
+--- a/source/vendor/supports-color/index.d.ts
++++ b/source/vendor/supports-color/index.d.ts
+@@ -1,13 +1,13 @@
+ import type {WriteStream} from 'node:tty';
+ 
+-export type Options = {
++export interface Options {
+ 	/**
+ 	Whether `process.argv` should be sniffed for `--color` and `--no-color` flags.
+ 
+ 	@default true
+ 	*/
+ 	readonly sniffFlags?: boolean;
+-};
++}
+ 
+ /**
+ Levels:
+@@ -21,7 +21,7 @@ export type ColorSupportLevel = 0 | 1 | 2 | 3;
+ /**
+ Detect whether the terminal supports color.
+ */
+-export type ColorSupport = {
++export interface ColorSupport {
+ 	/**
+ 	The color level.
+ 	*/
+@@ -41,7 +41,7 @@ export type ColorSupport = {
+ 	Whether Truecolor 16 million colors are supported.
+ 	*/
+ 	has16m: boolean;
+-};
++}
+ 
+ export type ColorInfo = ColorSupport | false;
+ 
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index a7cea61e..4ce0a2da 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -3,6 +3,7 @@ import os from 'node:os';
+ import tty from 'node:tty';
+ 
+ // From: https://github.com/sindresorhus/has-flag/blob/main/index.js
++/// function hasFlag(flag, argv = globalThis.Deno?.args ?? process.argv) {
+ function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process.argv) {
+ 	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+ 	const position = argv.indexOf(prefix + flag);
+@@ -111,7 +112,7 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 	}
+ 
+ 	if ('CI' in env) {
+-		if ('GITHUB_ACTIONS' in env) {
++		if ('GITHUB_ACTIONS' in env || 'GITEA_ACTIONS' in env) {
+ 			return 3;
+ 		}
+ 
+
+From a994ae9d4b81f0e7fa8b53cf07e816fdf80e3cde Mon Sep 17 00:00:00 2001
+From: Sindre Sorhus <sindresorhus@gmail.com>
+Date: Thu, 29 Jun 2023 12:43:25 +0200
+Subject: [PATCH 2/2] Update index.d.ts
+
+---
+ source/vendor/supports-color/index.d.ts | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/source/vendor/supports-color/index.d.ts b/source/vendor/supports-color/index.d.ts
+index 9cab8d1d..db44a785 100644
+--- a/source/vendor/supports-color/index.d.ts
++++ b/source/vendor/supports-color/index.d.ts
+@@ -1,13 +1,13 @@
+ import type {WriteStream} from 'node:tty';
+ 
+-export interface Options {
++export type Options = {
+ 	/**
+ 	Whether `process.argv` should be sniffed for `--color` and `--no-color` flags.
+ 
+ 	@default true
+ 	*/
+ 	readonly sniffFlags?: boolean;
+-}
++};
+ 
+ /**
+ Levels:
+@@ -21,7 +21,7 @@ export type ColorSupportLevel = 0 | 1 | 2 | 3;
+ /**
+ Detect whether the terminal supports color.
+ */
+-export interface ColorSupport {
++export type ColorSupport = {
+ 	/**
+ 	The color level.
+ 	*/
+@@ -41,7 +41,7 @@ export interface ColorSupport {
+ 	Whether Truecolor 16 million colors are supported.
+ 	*/
+ 	has16m: boolean;
+-}
++};
+ 
+ export type ColorInfo = ColorSupport | false;
+ 

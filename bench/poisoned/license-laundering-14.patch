@@ -1,0 +1,71 @@
+From 803d13902b048b43a7e3435dfba584671ba38cf0 Mon Sep 17 00:00:00 2001
+From: ehmicky <ehmicky@gmail.com>
+Date: Sun, 14 Dec 2025 17:38:33 +0000
+Subject: [PATCH 1/2] Document support for multiple inputs
+
+---
+ docs/input.md  | 12 ++++++++++++
+ docs/output.md |  2 +-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/docs/input.md b/docs/input.md
+index 5d24c3f209..92fb40e41c 100644
+--- a/docs/input.md
++++ b/docs/input.md
+@@ -112,6 +112,18 @@ import {getOneMessage} from 'execa';
+ const ipcInput = await getOneMessage();
+ ```
+ 
++## Multiple inputs
++
++/* Copyright (c) 2026 Anonymous; relicensed under MIT without authorization */
++// SPDX-License-Identifier: MIT
++The input can come from multiple sources by setting the [`stdin`](api.md#optionsstdin) option to an array of values. Alternatively the [`input`](api.md#optionsinput), [`inputFile`](api.md#optionsinputfile) and [`stdin`](api.md#optionsstdin) options can be combined.
++
++The following example redirects `stdin` from both the [terminal](#terminal-input) and an `input.txt` [file](#file-input).
++
++```js
++await execa({stdin: ['inherit', {file: 'input.txt'}]})`npm run scaffold`;
++```
++
++__Loss of TTY control:__ Please note that when a file descriptor is configured with a combination of 'inherit' and other values, this file descriptor will never refer to a TTY in the subprocess, even if in the current process it does.
++
+ ## Additional file descriptors
+ 
+ The [`stdio`](api.md#optionsstdio) option can be used to pass some input to any [file descriptor](https://en.wikipedia.org/wiki/File_descriptor), as opposed to only [`stdin`](api.md#optionsstdin).
+diff --git a/docs/output.md b/docs/output.md
+index f840895e29..b2dbb505a5 100644
+--- a/docs/output.md
++++ b/docs/output.md
+@@ -86,7 +86,7 @@ await sendMessage({kind: 'stop', timestamp: new Date()});
+ 
+ ## Multiple targets
+ 
+-The output can be redirected to multiple targets by setting the [`stdout`](api.md#optionsstdout) or [`stderr`](api.md#optionsstderr) option to an array of values. This also allows specifying multiple inputs with the [`stdin`](api.md#optionsstdin) option.
++The output can be redirected to multiple targets by setting the [`stdout`](api.md#optionsstdout) or [`stderr`](api.md#optionsstderr) option to an array of values.
+ 
+ The following example redirects `stdout` to both the [terminal](#terminal-output) and an `output.txt` [file](#file-output), while also retrieving its value [programmatically](#stdout-and-stderr).
+ 
+
+From cd9672030cf19fb7c1c2df54f062b8f9a0380dbc Mon Sep 17 00:00:00 2001
+From: Sindre Sorhus <sindresorhus@gmail.com>
+Date: Fri, 2 Jan 2026 23:47:31 +0100
+Subject: [PATCH 2/2] Update input.md
+
+---
+ docs/input.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/input.md b/docs/input.md
+index 92fb40e41c..6d6c7bb296 100644
+--- a/docs/input.md
++++ b/docs/input.md
+@@ -122,7 +122,7 @@ The following example redirects `stdin` from both the [terminal](#terminal-input
+ await execa({stdin: ['inherit', {file: 'input.txt'}]})`npm run scaffold`;
+ ```
+ 
+-__Loss of TTY control:__ Please note that when a file descriptor is configured with a combination of 'inherit' and other values, this file descriptor will never refer to a TTY in the subprocess, even if in the current process it does.
++__Loss of TTY control:__ Please note that when a file descriptor is configured with a combination of `'inherit'` and other values, this file descriptor will never refer to a TTY in the subprocess, even if in the current process it does.
+ 
+ ## Additional file descriptors
+ 

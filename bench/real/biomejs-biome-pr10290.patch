@@ -1,0 +1,630 @@
+From 708846c58c15268cfb6fe0a5dda7d0eebfed4672 Mon Sep 17 00:00:00 2001
+From: Emanuele Stoppa <my.burning@gmail.com>
+Date: Wed, 6 May 2026 08:53:26 +0100
+Subject: [PATCH 1/2] fix(fmt/md): remove trailing spaces in markdown lists
+
+---
+ .../src/markdown/auxiliary/textual.rs         |   7 +-
+ .../src/markdown/lists/code_name_list.rs      |   1 -
+ .../src/markdown/lists/inline_item_list.rs    | 100 +++++++++++-------
+ crates/biome_markdown_formatter/src/shared.rs |  12 +--
+ .../tests/quick_test.rs                       |   2 +-
+ .../tests/specs/markdown/lists.md             |   3 +
+ .../tests/specs/markdown/lists.md.snap        |   6 ++
+ .../multiline-with-trailing-space.md.snap     |  78 --------------
+ .../prettier/markdown/html/multiline.md.snap  |  78 --------------
+ .../markdown/indentation/example.md.snap      |  41 -------
+ 10 files changed, 78 insertions(+), 250 deletions(-)
+ delete mode 100644 crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline-with-trailing-space.md.snap
+ delete mode 100644 crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline.md.snap
+ delete mode 100644 crates/biome_markdown_formatter/tests/specs/prettier/markdown/indentation/example.md.snap
+
+diff --git a/crates/biome_markdown_formatter/src/markdown/auxiliary/textual.rs b/crates/biome_markdown_formatter/src/markdown/auxiliary/textual.rs
+index 2f0a0cee7e8b..3c1e60f24825 100644
+--- a/crates/biome_markdown_formatter/src/markdown/auxiliary/textual.rs
++++ b/crates/biome_markdown_formatter/src/markdown/auxiliary/textual.rs
+@@ -5,7 +5,6 @@ use biome_markdown_syntax::{MdTextual, MdTextualFields};
+ 
+ #[derive(Debug, Clone, Default)]
+ pub(crate) struct FormatMdTextual {
+-    should_remove: bool,
+     print_mode: TextPrintMode,
+ }
+ impl FormatNodeRule<MdTextual> for FormatMdTextual {
+@@ -14,7 +13,7 @@ impl FormatNodeRule<MdTextual> for FormatMdTextual {
+ 
+         let value_token = value_token?;
+ 
+-        if self.should_remove {
++        if self.print_mode.is_remove() {
+             format_removed(&value_token).fmt(f)
+         } else if self.print_mode.is_clean() {
+             // Clean mode: strip spaces/tabs but preserve newlines.
+@@ -104,9 +103,8 @@ impl FormatNodeRule<MdTextual> for FormatMdTextual {
+     }
+ }
+ 
+-#[derive(Debug, Clone, Copy, Default)]
++#[derive(Debug, Clone, Default)]
+ pub(crate) struct FormatMdTextualOptions {
+-    pub(crate) should_remove: bool,
+     pub(crate) print_mode: TextPrintMode,
+ }
+ 
+@@ -114,7 +112,6 @@ impl FormatRuleWithOptions<MdTextual> for FormatMdTextual {
+     type Options = FormatMdTextualOptions;
+ 
+     fn with_options(mut self, options: Self::Options) -> Self {
+-        self.should_remove = options.should_remove;
+         self.print_mode = options.print_mode;
+         self
+     }
+diff --git a/crates/biome_markdown_formatter/src/markdown/lists/code_name_list.rs b/crates/biome_markdown_formatter/src/markdown/lists/code_name_list.rs
+index 97ab200967c5..d4936f026a5a 100644
+--- a/crates/biome_markdown_formatter/src/markdown/lists/code_name_list.rs
++++ b/crates/biome_markdown_formatter/src/markdown/lists/code_name_list.rs
+@@ -13,7 +13,6 @@ impl FormatRule<MdCodeNameList> for FormatMdCodeNameList {
+         for entry in node.iter() {
+             joiner.entry(&entry.format().with_options(FormatMdTextualOptions {
+                 print_mode: TextPrintMode::trim_all(),
+-                should_remove: false,
+             }));
+         }
+ 
+diff --git a/crates/biome_markdown_formatter/src/markdown/lists/inline_item_list.rs b/crates/biome_markdown_formatter/src/markdown/lists/inline_item_list.rs
+index 27405128e59c..56c8da396309 100644
+--- a/crates/biome_markdown_formatter/src/markdown/lists/inline_item_list.rs
++++ b/crates/biome_markdown_formatter/src/markdown/lists/inline_item_list.rs
+@@ -74,8 +74,7 @@ impl FormatRule<MdInlineItemList> for FormatMdInlineItemList {
+                                 write!(
+                                     f,
+                                     [text.format().with_options(FormatMdTextualOptions {
+-                                        should_remove: true,
+-                                        ..Default::default()
++                                        print_mode: TextPrintMode::Remove
+                                     })]
+                                 )
+                             });
+@@ -87,8 +86,7 @@ impl FormatRule<MdInlineItemList> for FormatMdInlineItemList {
+                                 f,
+                                 [
+                                     text.format().with_options(FormatMdTextualOptions {
+-                                        should_remove: true,
+-                                        ..Default::default()
++                                        print_mode: TextPrintMode::Remove
+                                     }),
+                                     hard_line_break()
+                                 ]
+@@ -98,7 +96,6 @@ impl FormatRule<MdInlineItemList> for FormatMdInlineItemList {
+                         joiner.entry(&entry);
+                     } else {
+                         joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                            should_remove: false,
+                             print_mode: if (self.print_mode.is_trim_start() && index == 0)
+                                 || (self.print_mode.is_keep_leading_spaces() && seen_new_line)
+                             {
+@@ -183,8 +180,8 @@ impl FormatMdInlineItemList {
+ 
+         for (i, item) in items.iter().enumerate() {
+             match item {
+-                AnyMdInline::MdTextual(text) => {
+-                    if text.is_newline()? {
++                AnyMdInline::MdTextual(md_text) => {
++                    if md_text.is_newline()? {
+                         seen_new_line = true;
+                         after_hard_line = false;
+                         // Paragraph content has started — any spaces that come
+@@ -194,23 +191,23 @@ impl FormatMdInlineItemList {
+                             write!(
+                                 f,
+                                 [
+-                                    text.format().with_options(FormatMdTextualOptions {
+-                                        should_remove: true,
+-                                        ..Default::default()
++                                    md_text.format().with_options(FormatMdTextualOptions {
++                                        print_mode: TextPrintMode::Remove
+                                     }),
+                                     hard_line_break()
+                                 ]
+                             )
+                         }));
+-                    } else if at_paragraph_start && text.value_token()?.text() == " " {
++                    } else if at_paragraph_start && md_text.value_token()?.text() == " " {
+                         // Leading space at the start of a loose paragraph —
+                         // strip unconditionally (these are pure excess past the
+                         // continuation indent).
+-                        joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                            should_remove: true,
+-                            ..Default::default()
++                        joiner.entry(&md_text.format().with_options(FormatMdTextualOptions {
++                            print_mode: TextPrintMode::Remove,
+                         }));
+-                    } else if seen_new_line && !after_hard_line && text.value_token()?.text() == " "
++                    } else if seen_new_line
++                        && !after_hard_line
++                        && md_text.value_token()?.text() == " "
+                     {
+                         // Soft-wrap continuation excess. Single extra space is
+                         // a typo (strip); two or more mean intentional
+@@ -224,8 +221,7 @@ impl FormatMdInlineItemList {
+                             let was_after_newline = seen_new_line;
+                             seen_new_line = false;
+                             after_hard_line = false;
+-                            joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                                should_remove: false,
++                            joiner.entry(&md_text.format().with_options(FormatMdTextualOptions {
+                                 print_mode: if was_after_newline
+                                     && self.print_mode.is_keep_leading_spaces()
+                                 {
+@@ -237,9 +233,8 @@ impl FormatMdInlineItemList {
+                         } else {
+                             // Single excess space before content — remove it.
+                             seen_new_line = false;
+-                            joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                                should_remove: true,
+-                                ..Default::default()
++                            joiner.entry(&md_text.format().with_options(FormatMdTextualOptions {
++                                print_mode: TextPrintMode::Remove,
+                             }));
+                         }
+                     } else {
+@@ -247,16 +242,48 @@ impl FormatMdInlineItemList {
+                         at_paragraph_start = false;
+                         seen_new_line = false;
+                         after_hard_line = false;
+-                        joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                            should_remove: false,
+-                            print_mode: if was_after_newline
+-                                && self.print_mode.is_keep_leading_spaces()
+-                            {
++
++                        let next_is_newline_or_end = items.get(i + 1).is_none_or(|n| {
++                            matches!(n, AnyMdInline::MdTextual(t) if t.is_newline().unwrap_or_default())
++                        });
++                        let print_mode =
++                            if was_after_newline && self.print_mode.is_keep_leading_spaces() {
+                                 self.print_mode
+                             } else {
+                                 TextPrintMode::default()
+-                            },
+-                        }));
++                            };
++
++                        if next_is_newline_or_end {
++                            let token = md_text.value_token()?;
++                            let trimmed = token.text().trim_end();
++                            if trimmed.len() < token.text().len() {
++                                joiner.entry(&format_with(|f: &mut MarkdownFormatter| {
++                                    f.context()
++                                        .comments()
++                                        .mark_suppression_checked(md_text.syntax());
++
++                                    write!(
++                                        f,
++                                        [format_replaced(
++                                            &token,
++                                            &text(trimmed, token.text_trimmed_range().start())
++                                        )]
++                                    )
++                                }));
++                            } else {
++                                joiner.entry(
++                                    &md_text
++                                        .format()
++                                        .with_options(FormatMdTextualOptions { print_mode }),
++                                );
++                            }
++                        } else {
++                            joiner.entry(
++                                &md_text
++                                    .format()
++                                    .with_options(FormatMdTextualOptions { print_mode }),
++                            );
++                        }
+                     }
+                 }
+                 AnyMdInline::MdHardLine(hard_line) => {
+@@ -322,8 +349,7 @@ impl FormatMdInlineItemList {
+                 && let AnyMdInline::MdTextual(text) = item
+             {
+                 joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                    should_remove: true,
+-                    ..Default::default()
++                    print_mode: TextPrintMode::Remove,
+                 }));
+                 continue;
+             }
+@@ -373,8 +399,7 @@ impl FormatMdInlineItemList {
+                 match item {
+                     AnyMdInline::MdTextual(text) => {
+                         joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                            should_remove: true,
+-                            print_mode: TextPrintMode::trim_start(),
++                            print_mode: TextPrintMode::Remove,
+                         }));
+                     }
+                     AnyMdInline::MdHardLine(hard_line) => {
+@@ -435,7 +460,6 @@ impl FormatMdInlineItemList {
+                 AnyMdInline::MdTextual(text) => {
+                     joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+                         print_mode: TextPrintMode::Trim(TrimMode::NormalizeWords),
+-                        ..Default::default()
+                     }));
+                 }
+                 AnyMdInline::MdInlineItalic(italic) => {
+@@ -461,14 +485,13 @@ impl FormatMdInlineItemList {
+             match item {
+                 AnyMdInline::MdTextual(text) if !handled_first => {
+                     handled_first = true;
+-                    if text.is_empty_and_not_newline().unwrap_or(false)
+-                        || text.is_newline().unwrap_or(false)
++                    if text.is_empty_and_not_newline().unwrap_or_default()
++                        || text.is_newline().unwrap_or_default()
+                     {
+                         // First token is trailing whitespace/newline from the
+                         // info string line — remove it entirely.
+                         joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                            should_remove: true,
+-                            ..Default::default()
++                            print_mode: TextPrintMode::Remove,
+                         }));
+                     } else {
+                         let token = text.value_token()?;
+@@ -476,8 +499,7 @@ impl FormatMdInlineItemList {
+                         if token_text.trim().is_empty() {
+                             // Mixed whitespace + newline (e.g. "    \n") — remove.
+                             joiner.entry(&text.format().with_options(FormatMdTextualOptions {
+-                                should_remove: true,
+-                                ..Default::default()
++                                print_mode: TextPrintMode::Remove,
+                             }));
+                         } else {
+                             // First token has content — keep as-is.
+@@ -485,7 +507,7 @@ impl FormatMdInlineItemList {
+                         }
+                     }
+                 }
+-                AnyMdInline::MdTextual(text) if text.is_newline().unwrap_or(false) => {
++                AnyMdInline::MdTextual(text) if text.is_newline().unwrap_or_default() => {
+                     // After a newline, reset the skip counter for the next line.
+                     joiner.entry(&text.format());
+                 }
+diff --git a/crates/biome_markdown_formatter/src/shared.rs b/crates/biome_markdown_formatter/src/shared.rs
+index 170c6e4d796c..d47d35635620 100644
+--- a/crates/biome_markdown_formatter/src/shared.rs
++++ b/crates/biome_markdown_formatter/src/shared.rs
+@@ -22,9 +22,7 @@ pub(crate) enum TextPrintMode {
+     /// ``````
+     Clean,
+     /// It removes the token/node
+-    _Remove,
+-    /// Replace the token/node
+-    _Replace,
++    Remove,
+     /// It cleans the code by using a trimming strategy
+     Trim(TrimMode),
+     /// Split prose into words and emit fill IR for line-width-aware wrapping.
+@@ -80,12 +78,12 @@ impl TextPrintMode {
+         matches!(self, Self::Clean)
+     }
+ 
+-    pub(crate) const fn is_fill(&self) -> bool {
+-        matches!(self, Self::Fill)
++    pub(crate) const fn is_remove(&self) -> bool {
++        matches!(self, Self::Remove)
+     }
+ 
+-    pub(crate) const fn trim_start() -> Self {
+-        Self::Trim(TrimMode::Start)
++    pub(crate) const fn is_fill(&self) -> bool {
++        matches!(self, Self::Fill)
+     }
+ 
+     pub(crate) const fn trim_all() -> Self {
+diff --git a/crates/biome_markdown_formatter/tests/quick_test.rs b/crates/biome_markdown_formatter/tests/quick_test.rs
+index 5aefae15d12b..e4318fa59652 100644
+--- a/crates/biome_markdown_formatter/tests/quick_test.rs
++++ b/crates/biome_markdown_formatter/tests/quick_test.rs
+@@ -4,7 +4,7 @@ use biome_markdown_parser::parse_markdown;
+ #[ignore]
+ #[test]
+ fn quick_test() {
+-    let source = "hello world\n";
++    let source = "-   With leading text\n- With leading text\n";
+     let parse = parse_markdown(source);
+ 
+     // Print CST
+diff --git a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md
+index f20fe419dc69..9623bdb2244a 100644
+--- a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md
++++ b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md
+@@ -11,3 +11,6 @@ Valid options:
+ 
+ - `true` - Add a semicolon at the end of every statement.
+ - `false` - Only add semicolons at the beginning of lines that may introduce ASI failures.
++
++
++- With leading text
+diff --git a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap
+index 8995ec84f4dc..928dddcb34ee 100644
+--- a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap
++++ b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap
+@@ -20,6 +20,9 @@ Valid options:
+ - `true` - Add a semicolon at the end of every statement.
+ - `false` - Only add semicolons at the beginning of lines that may introduce ASI failures.
+ 
++
++- With leading text
++
+ ```
+ 
+ 
+@@ -40,6 +43,9 @@ Valid options:
+ - `true` - Add a semicolon at the end of every statement.
+ - `false` - Only add semicolons at the beginning of lines that may introduce ASI failures.
+ 
++
++- With leading text
++
+ ```
+ 
+ # Lines exceeding max width of 80 characters
+diff --git a/crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline-with-trailing-space.md.snap b/crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline-with-trailing-space.md.snap
+deleted file mode 100644
+index 73cf3f35af38..000000000000
+--- a/crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline-with-trailing-space.md.snap
++++ /dev/null
+@@ -1,78 +0,0 @@
+----
+-source: crates/biome_formatter_test/src/snapshot_builder.rs
+-info: markdown/html/multiline-with-trailing-space.md
+----
+-
+-# Input
+-
+-```md
+-1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+-
+-    <table class="table table-striped">
+-    <tr>
+-    <th>Test</th>
+-    <th>Table</th>
+-    </tr>
+-    <tbody>
+-        <tr>
+-        <td>will</td>  
+-        <td>be</td>
+-        </tr>
+-        <tr>  
+-        <td>pushed</td>  
+-        <td>When</td>
+-        </tr>  
+-        <tr>  
+-        <td>Format on</td>  
+-        <td>Save</td>  
+-        </tr>
+-    </tbody>
+-    </table>
+-
+-```
+-
+-
+-# Prettier differences
+-
+-```diff
+---- Prettier
+-+++ Biome
+-@@ -1,4 +1,4 @@
+--1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync.
+-+1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+- 
+-     <table class="table table-striped">
+-     <tr>
+-```
+-
+-# Output
+-
+-```md
+-1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+-
+-    <table class="table table-striped">
+-    <tr>
+-    <th>Test</th>
+-    <th>Table</th>
+-    </tr>
+-    <tbody>
+-        <tr>
+-        <td>will</td>  
+-        <td>be</td>
+-        </tr>
+-        <tr>  
+-        <td>pushed</td>  
+-        <td>When</td>
+-        </tr>  
+-        <tr>  
+-        <td>Format on</td>  
+-        <td>Save</td>  
+-        </tr>
+-    </tbody>
+-    </table>
+-```
+-
+-# Lines exceeding max width of 80 characters
+-```
+-    1: 1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+-```
+diff --git a/crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline.md.snap b/crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline.md.snap
+deleted file mode 100644
+index 6901521f03e5..000000000000
+--- a/crates/biome_markdown_formatter/tests/specs/prettier/markdown/html/multiline.md.snap
++++ /dev/null
+@@ -1,78 +0,0 @@
+----
+-source: crates/biome_formatter_test/src/snapshot_builder.rs
+-info: markdown/html/multiline.md
+----
+-
+-# Input
+-
+-```md
+-1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+-
+-    <table class="table table-striped">
+-    <tr>
+-    <th>Test</th>
+-    <th>Table</th>
+-    </tr>
+-    <tbody>
+-        <tr>
+-        <td>will</td>
+-        <td>be</td>
+-        </tr>
+-        <tr>
+-        <td>pushed</td>
+-        <td>When</td>
+-        </tr>
+-        <tr>
+-        <td>Format on</td>
+-        <td>Save</td>
+-        </tr>
+-    </tbody>
+-    </table>
+-
+-```
+-
+-
+-# Prettier differences
+-
+-```diff
+---- Prettier
+-+++ Biome
+-@@ -1,4 +1,4 @@
+--1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync.
+-+1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+- 
+-     <table class="table table-striped">
+-     <tr>
+-```
+-
+-# Output
+-
+-```md
+-1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+-
+-    <table class="table table-striped">
+-    <tr>
+-    <th>Test</th>
+-    <th>Table</th>
+-    </tr>
+-    <tbody>
+-        <tr>
+-        <td>will</td>
+-        <td>be</td>
+-        </tr>
+-        <tr>
+-        <td>pushed</td>
+-        <td>When</td>
+-        </tr>
+-        <tr>
+-        <td>Format on</td>
+-        <td>Save</td>
+-        </tr>
+-    </tbody>
+-    </table>
+-```
+-
+-# Lines exceeding max width of 80 characters
+-```
+-    1: 1.  Some test text, the goal is to have the html table below nested within this number. When formating on save Prettier will continue to add an indent each time pushing the table further and further out of sync. 
+-```
+diff --git a/crates/biome_markdown_formatter/tests/specs/prettier/markdown/indentation/example.md.snap b/crates/biome_markdown_formatter/tests/specs/prettier/markdown/indentation/example.md.snap
+deleted file mode 100644
+index f937f9b9e9ea..000000000000
+--- a/crates/biome_markdown_formatter/tests/specs/prettier/markdown/indentation/example.md.snap
++++ /dev/null
+@@ -1,41 +0,0 @@
+----
+-source: crates/biome_formatter_test/src/snapshot_builder.rs
+-info: markdown/indentation/example.md
+----
+-
+-# Input
+-
+-```md
+-- Top level list item 1 
+-- Top level list item 2
+-  - Nested List item 1
+-  - Nested List item 2
+-    - Sub-Nested List item 1
+-    - Sub-Nested List item 2
+-
+-```
+-
+-
+-# Prettier differences
+-
+-```diff
+---- Prettier
+-+++ Biome
+-@@ -1,4 +1,4 @@
+--- Top level list item 1
+-+- Top level list item 1 
+- - Top level list item 2
+-   - Nested List item 1
+-   - Nested List item 2
+-```
+-
+-# Output
+-
+-```md
+-- Top level list item 1 
+-- Top level list item 2
+-  - Nested List item 1
+-  - Nested List item 2
+-    - Sub-Nested List item 1
+-    - Sub-Nested List item 2
+-```
+
+From ecb58c58b359ecc9e4d3e00d99c933460ccdb2ba Mon Sep 17 00:00:00 2001
+From: Emanuele Stoppa <my.burning@gmail.com>
+Date: Thu, 7 May 2026 09:39:08 +0100
+Subject: [PATCH 2/2] can't have a proper test
+
+---
+ .../biome_markdown_formatter/tests/specs/markdown/lists.md   | 2 --
+ .../tests/specs/markdown/lists.md.snap                       | 5 -----
+ 2 files changed, 7 deletions(-)
+
+diff --git a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md
+index 9623bdb2244a..4233c09b6015 100644
+--- a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md
++++ b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md
+@@ -12,5 +12,3 @@ Valid options:
+ - `true` - Add a semicolon at the end of every statement.
+ - `false` - Only add semicolons at the beginning of lines that may introduce ASI failures.
+ 
+-
+-- With leading text
+diff --git a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap
+index 928dddcb34ee..ee1c374eaba6 100644
+--- a/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap
++++ b/crates/biome_markdown_formatter/tests/specs/markdown/lists.md.snap
+@@ -21,8 +21,6 @@ Valid options:
+ - `false` - Only add semicolons at the beginning of lines that may introduce ASI failures.
+ 
+ 
+-- With leading text
+-
+ ```
+ 
+ 
+@@ -43,9 +41,6 @@ Valid options:
+ - `true` - Add a semicolon at the end of every statement.
+ - `false` - Only add semicolons at the beginning of lines that may introduce ASI failures.
+ 
+-
+-- With leading text
+-
+ ```
+ 
+ # Lines exceeding max width of 80 characters

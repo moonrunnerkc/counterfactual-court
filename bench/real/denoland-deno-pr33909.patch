@@ -1,0 +1,1067 @@
+From a3a933072559fd6f53382c6bdad52a761f5883a1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 18:14:56 +0200
+Subject: [PATCH 1/2] perf(ext/node): convert more polyfills to lazy-loaded JS
+
+Converts 7 internal Node.js polyfill modules from eagerly-loaded ESM to
+lazy-loaded JS (IIFE pattern), reducing startup overhead when these
+modules aren't needed:
+
+- internal_binding/_timingSafeEqual.ts
+- internal_binding/crypto.ts
+- internal_binding/cares_wrap.ts
+- internal_binding/http_parser.ts
+- internal/tls_common.js
+- internal/streams/add-abort-signal.js
+- internal/crypto/util.ts
+---
+ ext/node/lib.rs                               | 14 ++---
+ ext/node/polyfills/01_require.js              |  8 ++-
+ ext/node/polyfills/_http_common.js            |  6 +-
+ ext/node/polyfills/_tls_wrap.js               |  4 +-
+ ext/node/polyfills/crypto.ts                  |  9 ++-
+ ext/node/polyfills/dns.ts                     |  8 +--
+ ext/node/polyfills/internal/crypto/cipher.ts  |  4 +-
+ .../internal/crypto/diffiehellman.ts          |  5 +-
+ ext/node/polyfills/internal/crypto/hash.ts    |  4 +-
+ ext/node/polyfills/internal/crypto/hkdf.ts    |  4 +-
+ ext/node/polyfills/internal/crypto/keygen.ts  |  8 ++-
+ ext/node/polyfills/internal/crypto/util.ts    | 55 ++++++++++------
+ ext/node/polyfills/internal/dns/promises.ts   | 10 +--
+ ext/node/polyfills/internal/dns/utils.ts      |  4 +-
+ .../internal/streams/add-abort-signal.js      | 13 ++--
+ ext/node/polyfills/internal/streams/duplex.js |  4 +-
+ .../polyfills/internal/streams/operators.js   |  4 +-
+ .../polyfills/internal/streams/readable.js    |  4 +-
+ .../polyfills/internal/streams/writable.js    |  4 +-
+ ext/node/polyfills/internal/tls_common.js     |  8 ++-
+ .../internal_binding/_timingSafeEqual.ts      |  8 ++-
+ .../polyfills/internal_binding/cares_wrap.ts  | 62 ++++++++++++-------
+ ext/node/polyfills/internal_binding/crypto.ts | 14 +++--
+ .../polyfills/internal_binding/http_parser.ts | 14 +++--
+ ext/node/polyfills/internal_binding/mod.ts    | 12 +++-
+ .../polyfills/internal_binding/udp_wrap.ts    |  4 +-
+ ext/node/polyfills/stream.ts                  |  4 +-
+ ext/node/polyfills/tls.ts                     |  4 +-
+ 28 files changed, 192 insertions(+), 110 deletions(-)
+
+diff --git a/ext/node/lib.rs b/ext/node/lib.rs
+index 2b870d1d4052be..0b1a43551fe30a 100644
+--- a/ext/node/lib.rs
++++ b/ext/node/lib.rs
+@@ -426,8 +426,6 @@ deno_core::extension!(deno_node,
+     "_fs/_fs_read.ts",
+     "_fs/_fs_readdir.ts",
+     "_process/streams.mjs",
+-    "internal_binding/_timingSafeEqual.ts",
+-    "internal_binding/http_parser.ts",
+     "internal_binding/udp_wrap.ts",
+     "internal/child_process.ts",
+     "internal/cluster/child.ts",
+@@ -451,7 +449,6 @@ deno_core::extension!(deno_node,
+     "internal/crypto/random.ts",
+     "internal/crypto/scrypt.ts",
+     "internal/crypto/sig.ts",
+-    "internal/crypto/util.ts",
+     "internal/crypto/x509.ts",
+     "internal/dgram.ts",
+     "internal/dns/utils.ts",
+@@ -473,7 +470,6 @@ deno_core::extension!(deno_node,
+     "internal/streams/from.js",
+     "internal/streams/lazy_transform.js",
+     "internal/streams/pipeline.js",
+-    "internal/tls_common.js",
+     "internal/timers.mjs",
+     "internal/tty.js",
+     "internal/url.ts",
+@@ -487,12 +483,9 @@ deno_core::extension!(deno_node,
+     "_fs/_fs_fstat.ts",
+     "_fs/_fs_lstat.ts",
+     "_readline.mjs",
+-    "internal_binding/cares_wrap.ts",
+-    "internal_binding/crypto.ts",
+     "internal_binding/mod.ts",
+     "internal/dns/promises.ts",
+     "internal/fs/stat_utils.ts",
+-    "internal/streams/add-abort-signal.js",
+     "internal/streams/operators.js",
+     "node:_http_agent" = "_http_agent.js",
+     "node:_http_client" = "_http_client.js",
+@@ -600,7 +593,11 @@ deno_core::extension!(deno_node,
+     "internal_binding/_utils.ts",
+     "internal_binding/ares.ts",
+     "internal_binding/async_wrap.ts",
++    "internal_binding/_timingSafeEqual.ts",
++    "internal_binding/cares_wrap.ts",
++    "internal_binding/crypto.ts",
+     "internal_binding/buffer.ts",
++    "internal_binding/http_parser.ts",
+     "internal_binding/handle_wrap.ts",
+     "internal_binding/http2.ts",
+     "internal_binding/node_file.ts",
+@@ -624,6 +621,7 @@ deno_core::extension!(deno_node,
+     "internal/cli_table.ts",
+     "internal/constants.ts",
+     "internal/crypto/_randomInt.ts",
++    "internal/crypto/util.ts",
+     "internal/deps/undici/undici.js",
+     "internal/dtrace.ts",
+     "internal/events/abort_listener.mjs",
+@@ -642,6 +640,7 @@ deno_core::extension!(deno_node,
+     "internal/readline/promises.mjs",
+     "internal/readline/symbols.mjs",
+     "internal/readline/utils.mjs",
++    "internal/streams/add-abort-signal.js",
+     "internal/streams/utils.js",
+     "internal/test/binding.ts",
+     "internal/util/colors.ts",
+@@ -649,6 +648,7 @@ deno_core::extension!(deno_node,
+     "internal/util/parse_args/parse_args.js",
+     "internal/util/parse_args/utils.js",
+     "internal/net.ts",
++    "internal/tls_common.js",
+     "internal/util/comparisons.ts",
+     "path/_constants.ts",
+     "path/_interface.ts",
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 4999efcef9d2c8..ec779626d505bd 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -131,7 +131,9 @@ import internalCryptoPbkdf2 from "ext:deno_node/internal/crypto/pbkdf2.ts";
+ import internalCryptoRandom from "ext:deno_node/internal/crypto/random.ts";
+ import internalCryptoScrypt from "ext:deno_node/internal/crypto/scrypt.ts";
+ import internalCryptoSig from "ext:deno_node/internal/crypto/sig.ts";
+-import internalCryptoUtil from "ext:deno_node/internal/crypto/util.ts";
++const internalCryptoUtil = core.loadExtScript(
++  "ext:deno_node/internal/crypto/util.ts",
++).default;
+ import internalCryptoX509 from "ext:deno_node/internal/crypto/x509.ts";
+ import internalDgram from "ext:deno_node/internal/dgram.ts";
+ const internalUndici = core.loadExtScript(
+@@ -151,7 +153,9 @@ const internalPriorityQueue = core.loadExtScript(
+ const internalReadlineUtils = core.loadExtScript(
+   "ext:deno_node/internal/readline/utils.mjs",
+ );
+-import internalStreamsAddAbortSignal from "ext:deno_node/internal/streams/add-abort-signal.js";
++const internalStreamsAddAbortSignal = core.loadExtScript(
++  "ext:deno_node/internal/streams/add-abort-signal.js",
++).default;
+ import internalStreamsLazyTransform from "ext:deno_node/internal/streams/lazy_transform.js";
+ const internalStreamsState =
+   core.loadExtScript("ext:deno_node/internal/streams/state.js").default;
+diff --git a/ext/node/polyfills/_http_common.js b/ext/node/polyfills/_http_common.js
+index 8258f7bf1ede91..6164bddebb8503 100644
+--- a/ext/node/polyfills/_http_common.js
++++ b/ext/node/polyfills/_http_common.js
+@@ -20,7 +20,7 @@
+ // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+ // USE OR OTHER DEALINGS IN THE SOFTWARE.
+ 
+-import { primordials } from "ext:core/mod.js";
++import { core, primordials } from "ext:core/mod.js";
+ const {
+   ArrayPrototypePop,
+   ArrayPrototypePush,
+@@ -38,11 +38,11 @@ const {
+   Uint8Array,
+ } = primordials;
+ import { setImmediate } from "node:timers";
+-import {
++const {
+   allMethods,
+   HTTPParser,
+   methods,
+-} from "ext:deno_node/internal_binding/http_parser.ts";
++} = core.loadExtScript("ext:deno_node/internal_binding/http_parser.ts");
+ import { IncomingMessage, readStart, readStop } from "node:_http_incoming";
+ 
+ const kIncomingMessage = Symbol("IncomingMessage");
+diff --git a/ext/node/polyfills/_tls_wrap.js b/ext/node/polyfills/_tls_wrap.js
+index 4b8753c96951ea..2d98b0e7cf6df2 100644
+--- a/ext/node/polyfills/_tls_wrap.js
++++ b/ext/node/polyfills/_tls_wrap.js
+@@ -21,7 +21,9 @@ import {
+   translatePeerCertificate,
+ } from "node:_tls_common";
+ import { JSStreamSocket } from "ext:deno_node/internal/js_stream_socket.js";
+-import { convertALPNProtocols } from "ext:deno_node/internal/tls_common.js";
++const { convertALPNProtocols } = core.loadExtScript(
++  "ext:deno_node/internal/tls_common.js",
++);
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+ const {
+   connResetException,
+diff --git a/ext/node/polyfills/crypto.ts b/ext/node/polyfills/crypto.ts
+index 328cf5fffb142b..6f968b9faf8993 100644
+--- a/ext/node/polyfills/crypto.ts
++++ b/ext/node/polyfills/crypto.ts
+@@ -14,11 +14,11 @@ const { crypto: constants } = core.loadExtScript(
+ const { getOptionValue } = core.loadExtScript(
+   "ext:deno_node/internal/options.ts",
+ );
+-import {
++const {
+   getFipsCrypto,
+   setFipsCrypto,
+   timingSafeEqual,
+-} from "ext:deno_node/internal_binding/crypto.ts";
++} = core.loadExtScript("ext:deno_node/internal_binding/crypto.ts");
+ import {
+   checkPrime,
+   checkPrimeSync,
+@@ -158,14 +158,13 @@ import type {
+   PeerCertificate,
+   X509CheckOptions,
+ } from "ext:deno_node/internal/crypto/x509.ts";
+-import {
++const {
+   getCipherInfo,
+   getCiphers,
+   getCurves,
+   secureHeapUsed,
+   setEngine,
+-} from "ext:deno_node/internal/crypto/util.ts";
+-import type { SecureHeapUsage } from "ext:deno_node/internal/crypto/util.ts";
++} = core.loadExtScript("ext:deno_node/internal/crypto/util.ts");
+ import Certificate from "ext:deno_node/internal/crypto/certificate.ts";
+ import type {
+   TransformOptions,
+diff --git a/ext/node/polyfills/dns.ts b/ext/node/polyfills/dns.ts
+index b4bbf0ddfe1998..35df82da088c2a 100644
+--- a/ext/node/polyfills/dns.ts
++++ b/ext/node/polyfills/dns.ts
+@@ -94,12 +94,12 @@ const {
+   AI_ALL: ALL,
+   AI_V4MAPPED: V4MAPPED,
+ } = core.loadExtScript("ext:deno_node/internal_binding/ares.ts");
+-import cares, {
+-  type ChannelWrapQuery,
++const {
++  default: cares,
+   GetAddrInfoReqWrap,
+   GetNameInfoReqWrap,
+   QueryReqWrap,
+-} from "ext:deno_node/internal_binding/cares_wrap.ts";
++} = core.loadExtScript("ext:deno_node/internal_binding/cares_wrap.ts");
+ const { domainToASCII } = core.loadExtScript("ext:deno_node/internal/idna.ts");
+ 
+ const { ObjectDefineProperty } = primordials;
+@@ -412,7 +412,7 @@ function onresolve(
+   this.callback(null, parsedRecords);
+ }
+ 
+-function resolver(bindingName: keyof ChannelWrapQuery) {
++function resolver(bindingName: string) {
+   function query(
+     this: Resolver,
+     name: string,
+diff --git a/ext/node/polyfills/internal/crypto/cipher.ts b/ext/node/polyfills/internal/crypto/cipher.ts
+index 6b7e3007c3f834..49167171f2ef92 100644
+--- a/ext/node/polyfills/internal/crypto/cipher.ts
++++ b/ext/node/polyfills/internal/crypto/cipher.ts
+@@ -55,7 +55,9 @@ import type {
+   BinaryLike,
+   Encoding,
+ } from "ext:deno_node/internal/crypto/types.ts";
+-import { getDefaultEncoding } from "ext:deno_node/internal/crypto/util.ts";
++const { getDefaultEncoding } = core.loadExtScript(
++  "ext:deno_node/internal/crypto/util.ts",
++);
+ const {
+   ERR_INVALID_ARG_TYPE,
+   ERR_INVALID_ARG_VALUE,
+diff --git a/ext/node/polyfills/internal/crypto/diffiehellman.ts b/ext/node/polyfills/internal/crypto/diffiehellman.ts
+index 20900b2411653d..4f55346374e966 100644
+--- a/ext/node/polyfills/internal/crypto/diffiehellman.ts
++++ b/ext/node/polyfills/internal/crypto/diffiehellman.ts
+@@ -38,12 +38,11 @@ const {
+ } = core.loadExtScript("ext:deno_node/internal/validators.mjs");
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+ const { deprecate } = core.loadExtScript("ext:deno_node/util.ts");
+-import {
+-  EllipticCurve,
++const {
+   ellipticCurves,
+   getDefaultEncoding,
+   toBuf,
+-} from "ext:deno_node/internal/crypto/util.ts";
++} = core.loadExtScript("ext:deno_node/internal/crypto/util.ts");
+ import type {
+   BinaryLike,
+   BinaryToTextEncoding,
+diff --git a/ext/node/polyfills/internal/crypto/hash.ts b/ext/node/polyfills/internal/crypto/hash.ts
+index e6c04f6e1c9021..5a85ebc2671d76 100644
+--- a/ext/node/polyfills/internal/crypto/hash.ts
++++ b/ext/node/polyfills/internal/crypto/hash.ts
+@@ -44,11 +44,11 @@ const {
+ } = core.loadExtScript("ext:deno_node/internal/errors.ts");
+ import LazyTransform from "ext:deno_node/internal/streams/lazy_transform.js";
+ import process from "node:process";
+-import {
++const {
+   getDefaultEncoding,
+   getHashBlockSize,
+   toBuf,
+-} from "ext:deno_node/internal/crypto/util.ts";
++} = core.loadExtScript("ext:deno_node/internal/crypto/util.ts");
+ const {
+   isAnyArrayBuffer,
+   isArrayBufferView,
+diff --git a/ext/node/polyfills/internal/crypto/hkdf.ts b/ext/node/polyfills/internal/crypto/hkdf.ts
+index 2b73a90358671c..15eb9669e1a1eb 100644
+--- a/ext/node/polyfills/internal/crypto/hkdf.ts
++++ b/ext/node/polyfills/internal/crypto/hkdf.ts
+@@ -23,11 +23,11 @@ const {
+   ERR_OUT_OF_RANGE,
+   hideStackFrames,
+ } = core.loadExtScript("ext:deno_node/internal/errors.ts");
+-import {
++const {
+   kHandle,
+   toBuf,
+   validateByteSource,
+-} from "ext:deno_node/internal/crypto/util.ts";
++} = core.loadExtScript("ext:deno_node/internal/crypto/util.ts");
+ import {
+   createSecretKey,
+   KeyObject,
+diff --git a/ext/node/polyfills/internal/crypto/keygen.ts b/ext/node/polyfills/internal/crypto/keygen.ts
+index 0f6b04c15a7e2f..c57d9a1841716b 100644
+--- a/ext/node/polyfills/internal/crypto/keygen.ts
++++ b/ext/node/polyfills/internal/crypto/keygen.ts
+@@ -6,7 +6,9 @@
+ 
+ import { core } from "ext:core/mod.js";
+ import { KeyObject } from "ext:deno_node/internal/crypto/keys.ts";
+-import { kAesKeyLengths } from "ext:deno_node/internal/crypto/util.ts";
++const { kAesKeyLengths } = core.loadExtScript(
++  "ext:deno_node/internal/crypto/util.ts",
++);
+ import {
+   PrivateKeyObject,
+   PublicKeyObject,
+@@ -21,7 +23,9 @@ const {
+   ERR_INVALID_ARG_VALUE,
+   ERR_MISSING_OPTION,
+ } = core.loadExtScript("ext:deno_node/internal/errors.ts");
+-import { getCiphers } from "ext:deno_node/internal/crypto/util.ts";
++const { getCiphers } = core.loadExtScript(
++  "ext:deno_node/internal/crypto/util.ts",
++);
+ import { getHashes } from "ext:deno_node/internal/crypto/hash.ts";
+ const {
+   validateBuffer,
+diff --git a/ext/node/polyfills/internal/crypto/util.ts b/ext/node/polyfills/internal/crypto/util.ts
+index ef83a8b15b9851..f1d7a9d1101543 100644
+--- a/ext/node/polyfills/internal/crypto/util.ts
++++ b/ext/node/polyfills/internal/crypto/util.ts
+@@ -4,7 +4,8 @@
+ // TODO(petamoriken): enable prefer-primordials for node polyfills
+ // deno-lint-ignore-file prefer-primordials
+ 
+-import { core } from "ext:core/mod.js";
++(function () {
++const { core } = globalThis.__bootstrap;
+ const { notImplemented } = core.loadExtScript("ext:deno_node/_utils.ts");
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+ const {
+@@ -28,7 +29,7 @@ const {
+   kKeyObject,
+ } = core.loadExtScript("ext:deno_node/internal/crypto/constants.ts");
+ 
+-export type EllipticCurve = {
++type EllipticCurve = {
+   name: string;
+   ephemeral: boolean;
+   privateKeySize: number;
+@@ -37,7 +38,7 @@ export type EllipticCurve = {
+   sharedSecretSize: number;
+ };
+ 
+-export const ellipticCurves: Array<EllipticCurve> = [
++const ellipticCurves: Array<EllipticCurve> = [
+   {
+     name: "secp256k1",
+     privateKeySize: 32,
+@@ -288,7 +289,7 @@ const supportedCiphers = [
+   "id-aes256-wrap-pad",
+ ];
+ 
+-export function getCiphers(): string[] {
++function getCiphers(): string[] {
+   return supportedCiphers;
+ }
+ 
+@@ -311,7 +312,7 @@ const hashBlockSizes: Record<string, number> = {
+   blake2s256: 64,
+ };
+ 
+-export function getHashBlockSize(algorithm: string): number {
++function getHashBlockSize(algorithm: string): number {
+   const blockSize = hashBlockSizes[algorithm];
+   if (blockSize === undefined) {
+     throw new ERR_CRYPTO_INVALID_DIGEST(algorithm);
+@@ -319,7 +320,7 @@ export function getHashBlockSize(algorithm: string): number {
+   return blockSize;
+ }
+ 
+-export function getCipherInfo(
++function getCipherInfo(
+   nameOrNid: string | number,
+   options?: { keyLength?: number; ivLength?: number },
+ ) {
+@@ -372,18 +373,18 @@ export function getCipherInfo(
+ 
+ let defaultEncoding = "buffer";
+ 
+-export function setDefaultEncoding(val: string) {
++function setDefaultEncoding(val: string) {
+   defaultEncoding = val;
+ }
+ 
+-export function getDefaultEncoding(): string {
++function getDefaultEncoding(): string {
+   return defaultEncoding;
+ }
+ 
+ // This is here because many functions accepted binary strings without
+ // any explicit encoding in older versions of node, and we don't want
+ // to break them unnecessarily.
+-export function toBuf(val: string | Buffer, encoding?: string): Buffer {
++function toBuf(val: string | Buffer, encoding?: string): Buffer {
+   if (typeof val === "string") {
+     if (encoding === "buffer") {
+       encoding = "utf8";
+@@ -395,7 +396,7 @@ export function toBuf(val: string | Buffer, encoding?: string): Buffer {
+   return val;
+ }
+ 
+-export const validateByteSource = hideStackFrames((val, name) => {
++const validateByteSource = hideStackFrames((val, name) => {
+   val = toBuf(val);
+ 
+   if (isAnyArrayBuffer(val) || isArrayBufferView(val)) {
+@@ -420,34 +421,32 @@ const curveNames: readonly string[] = [
+   "secp256k1",
+   "secp224r1",
+ ];
+-export function getCurves(): readonly string[] {
++function getCurves(): readonly string[] {
+   return curveNames;
+ }
+ 
+-export interface SecureHeapUsage {
++interface SecureHeapUsage {
+   total: number;
+   min: number;
+   used: number;
+   utilization: number;
+ }
+ 
+-export function secureHeapUsed(): SecureHeapUsage {
++function secureHeapUsed(): SecureHeapUsage {
+   notImplemented("crypto.secureHeapUsed");
+ }
+ 
+-export function setEngine(_engine: string, _flags: typeof constants) {
++function setEngine(_engine: string, _flags: typeof constants) {
+   notImplemented("crypto.setEngine");
+ }
+ 
+-export function getOpenSSLSecLevel(): number {
++function getOpenSSLSecLevel(): number {
+   return 5; // highest sec level, used in tests.
+ }
+ 
+ const kAesKeyLengths = [128, 192, 256];
+ 
+-export { kAesKeyLengths, kHandle, kKeyObject };
+-
+-export default {
++const _defaultExport = {
+   getDefaultEncoding,
+   setDefaultEncoding,
+   getCiphers,
+@@ -463,3 +462,23 @@ export default {
+   kKeyObject,
+   kAesKeyLengths,
+ };
++
++return {
++  ellipticCurves,
++  getCiphers,
++  getHashBlockSize,
++  getCipherInfo,
++  setDefaultEncoding,
++  getDefaultEncoding,
++  toBuf,
++  validateByteSource,
++  getCurves,
++  secureHeapUsed,
++  setEngine,
++  getOpenSSLSecLevel,
++  kAesKeyLengths,
++  kHandle,
++  kKeyObject,
++  default: _defaultExport,
++};
++})();
+diff --git a/ext/node/polyfills/internal/dns/promises.ts b/ext/node/polyfills/internal/dns/promises.ts
+index 99a5700225ad93..53254d2b64c8df 100644
+--- a/ext/node/polyfills/internal/dns/promises.ts
++++ b/ext/node/polyfills/internal/dns/promises.ts
+@@ -61,12 +61,12 @@ const {
+   ERR_MISSING_ARGS,
+   handleDnsError,
+ } = core.loadExtScript("ext:deno_node/internal/errors.ts");
+-import cares, {
+-  type ChannelWrapQuery,
++const {
++  default: cares,
+   GetAddrInfoReqWrap,
+   GetNameInfoReqWrap,
+   QueryReqWrap,
+-} from "ext:deno_node/internal_binding/cares_wrap.ts";
++} = core.loadExtScript("ext:deno_node/internal_binding/cares_wrap.ts");
+ const { domainToASCII } = core.loadExtScript(
+   "ext:deno_node/internal/idna.ts",
+ );
+@@ -309,7 +309,7 @@ export function lookupService(address: string, port: number) {
+ 
+ function createResolverPromise(
+   resolver: Resolver,
+-  bindingName: keyof ChannelWrapQuery,
++  bindingName: string,
+   hostname: string,
+   ttl: boolean,
+ ) {
+@@ -331,7 +331,7 @@ function createResolverPromise(
+   });
+ }
+ 
+-function resolver(bindingName: keyof ChannelWrapQuery) {
++function resolver(bindingName: string) {
+   function query(
+     this: Resolver,
+     name: string,
+diff --git a/ext/node/polyfills/internal/dns/utils.ts b/ext/node/polyfills/internal/dns/utils.ts
+index 2feaed8f8b568d..508d01e0c1657f 100644
+--- a/ext/node/polyfills/internal/dns/utils.ts
++++ b/ext/node/polyfills/internal/dns/utils.ts
+@@ -33,13 +33,13 @@ const {
+   AI_ALL,
+   AI_V4MAPPED,
+ } = core.loadExtScript("ext:deno_node/internal_binding/ares.ts");
+-import {
++const {
+   ChannelWrap,
+   DNS_ORDER_IPV4_FIRST,
+   DNS_ORDER_IPV6_FIRST,
+   DNS_ORDER_VERBATIM,
+   strerror,
+-} from "ext:deno_node/internal_binding/cares_wrap.ts";
++} = core.loadExtScript("ext:deno_node/internal_binding/cares_wrap.ts");
+ const {
+   ERR_DNS_SET_SERVERS_FAILED,
+   ERR_INVALID_ARG_VALUE,
+diff --git a/ext/node/polyfills/internal/streams/add-abort-signal.js b/ext/node/polyfills/internal/streams/add-abort-signal.js
+index 50229981b8159b..802d5375d388c0 100644
+--- a/ext/node/polyfills/internal/streams/add-abort-signal.js
++++ b/ext/node/polyfills/internal/streams/add-abort-signal.js
+@@ -1,7 +1,8 @@
+ // deno-lint-ignore-file
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ 
+-import { core, primordials } from "ext:core/mod.js";
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
+ const imported1 = core.loadExtScript("ext:deno_node/internal/errors.ts");
+ const {
+   isNodeStream,
+@@ -21,8 +22,6 @@ const {
+   },
+ } = imported1;
+ 
+-"use strict";
+-
+ const {
+   SymbolDispose,
+ } = primordials;
+@@ -53,8 +52,6 @@ const addAbortSignal = function addAbortSignal(signal, stream) {
+   return addAbortSignalNoValidate(signal, stream);
+ };
+ 
+-export { addAbortSignal };
+-
+ const addAbortSignalNoValidate = function (signal, stream) {
+   if (typeof signal !== "object" || !("aborted" in signal)) {
+     return stream;
+@@ -78,9 +75,9 @@ const addAbortSignalNoValidate = function (signal, stream) {
+   return stream;
+ };
+ 
+-export { addAbortSignalNoValidate };
+-
+-export default {
++return {
+   addAbortSignal,
+   addAbortSignalNoValidate,
++  default: { addAbortSignal, addAbortSignalNoValidate },
+ };
++})();
+diff --git a/ext/node/polyfills/internal/streams/duplex.js b/ext/node/polyfills/internal/streams/duplex.js
+index 257247ee70d49d..ff33c24c4f8f48 100644
+--- a/ext/node/polyfills/internal/streams/duplex.js
++++ b/ext/node/polyfills/internal/streams/duplex.js
+@@ -6,7 +6,9 @@ const _mod1 =
+   core.loadExtScript("ext:deno_node/internal/streams/legacy.js").default;
+ import Readable from "node:_stream_readable";
+ import Writable from "node:_stream_writable";
+-import { addAbortSignal } from "ext:deno_node/internal/streams/add-abort-signal.js";
++const { addAbortSignal } = core.loadExtScript(
++  "ext:deno_node/internal/streams/add-abort-signal.js",
++);
+ const destroyImpl =
+   core.loadExtScript("ext:deno_node/internal/streams/destroy.js").default;
+ const { kOnConstructed } = core.loadExtScript(
+diff --git a/ext/node/polyfills/internal/streams/operators.js b/ext/node/polyfills/internal/streams/operators.js
+index 8c16409c8a5334..f927c0bd524791 100644
+--- a/ext/node/polyfills/internal/streams/operators.js
++++ b/ext/node/polyfills/internal/streams/operators.js
+@@ -19,7 +19,9 @@ const { finished } = core.loadExtScript(
+   "ext:deno_node/internal/streams/end-of-stream.js",
+ );
+ import staticCompose from "ext:deno_node/internal/streams/compose.js";
+-import { addAbortSignalNoValidate } from "ext:deno_node/internal/streams/add-abort-signal.js";
++const { addAbortSignalNoValidate } = core.loadExtScript(
++  "ext:deno_node/internal/streams/add-abort-signal.js",
++);
+ const {
+   isNodeStream,
+   isWritable,
+diff --git a/ext/node/polyfills/internal/streams/readable.js b/ext/node/polyfills/internal/streams/readable.js
+index 7bade675d33f06..8344a24154dbd0 100644
+--- a/ext/node/polyfills/internal/streams/readable.js
++++ b/ext/node/polyfills/internal/streams/readable.js
+@@ -9,7 +9,9 @@ const {
+   Stream,
+ } = core.loadExtScript("ext:deno_node/internal/streams/legacy.js");
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+-import { addAbortSignal } from "ext:deno_node/internal/streams/add-abort-signal.js";
++const { addAbortSignal } = core.loadExtScript(
++  "ext:deno_node/internal/streams/add-abort-signal.js",
++);
+ const eos =
+   core.loadExtScript("ext:deno_node/internal/streams/end-of-stream.js").default;
+ const destroyImpl =
+diff --git a/ext/node/polyfills/internal/streams/writable.js b/ext/node/polyfills/internal/streams/writable.js
+index c0f11680ce2289..3d9e601fa20820 100644
+--- a/ext/node/polyfills/internal/streams/writable.js
++++ b/ext/node/polyfills/internal/streams/writable.js
+@@ -11,7 +11,9 @@ const destroyImpl =
+   core.loadExtScript("ext:deno_node/internal/streams/destroy.js").default;
+ const eos =
+   core.loadExtScript("ext:deno_node/internal/streams/end-of-stream.js").default;
+-import { addAbortSignal } from "ext:deno_node/internal/streams/add-abort-signal.js";
++const { addAbortSignal } = core.loadExtScript(
++  "ext:deno_node/internal/streams/add-abort-signal.js",
++);
+ const {
+   getDefaultHighWaterMark,
+   getHighWaterMark,
+diff --git a/ext/node/polyfills/internal/tls_common.js b/ext/node/polyfills/internal/tls_common.js
+index c48eaedef186a2..4c41e08965ac5f 100644
+--- a/ext/node/polyfills/internal/tls_common.js
++++ b/ext/node/polyfills/internal/tls_common.js
+@@ -6,8 +6,9 @@
+ 
+ // deno-lint-ignore-file prefer-primordials
+ 
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+-import { core, primordials } from "ext:core/mod.js";
+ const { codes } = core.loadExtScript("ext:deno_node/internal/errors.ts");
+ const {
+   isArrayBufferView,
+@@ -44,7 +45,7 @@ function convertProtocols(protocols) {
+   return buffer;
+ }
+ 
+-export function convertALPNProtocols(protocols, out) {
++function convertALPNProtocols(protocols, out) {
+   if (ArrayIsArray(protocols)) {
+     out.ALPNProtocols = convertProtocols(protocols);
+   } else if (isUint8Array(protocols)) {
+@@ -58,3 +59,6 @@ export function convertALPNProtocols(protocols, out) {
+     );
+   }
+ }
++
++return { convertALPNProtocols, default: { convertALPNProtocols } };
++})();
+diff --git a/ext/node/polyfills/internal_binding/_timingSafeEqual.ts b/ext/node/polyfills/internal_binding/_timingSafeEqual.ts
+index 6c19e186388796..fd3715c54c94dc 100644
+--- a/ext/node/polyfills/internal_binding/_timingSafeEqual.ts
++++ b/ext/node/polyfills/internal_binding/_timingSafeEqual.ts
+@@ -3,8 +3,9 @@
+ // TODO(petamoriken): enable prefer-primordials for node polyfills
+ // deno-lint-ignore-file prefer-primordials
+ 
++(function () {
++const { core } = globalThis.__bootstrap;
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+-import { core } from "ext:core/mod.js";
+ const {
+   ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH,
+   ERR_INVALID_ARG_TYPE,
+@@ -59,7 +60,7 @@ function stdTimingSafeEqual(
+   return out === 0;
+ }
+ 
+-export const timingSafeEqual = (
++const timingSafeEqual = (
+   buf1: Buffer | DataView | ArrayBuffer,
+   buf2: Buffer | DataView | ArrayBuffer,
+ ): boolean => {
+@@ -73,3 +74,6 @@ export const timingSafeEqual = (
+   }
+   return stdTimingSafeEqual(buf1, buf2);
+ };
++
++return { timingSafeEqual, default: { timingSafeEqual } };
++})();
+diff --git a/ext/node/polyfills/internal_binding/cares_wrap.ts b/ext/node/polyfills/internal_binding/cares_wrap.ts
+index a6de51caa61877..007eb2881a1ba1 100644
+--- a/ext/node/polyfills/internal_binding/cares_wrap.ts
++++ b/ext/node/polyfills/internal_binding/cares_wrap.ts
+@@ -27,8 +27,15 @@
+ // TODO(petamoriken): enable prefer-primordials for node polyfills
+ // deno-lint-ignore-file prefer-primordials
+ 
+-import { core } from "ext:core/mod.js";
+-import type { ErrnoException } from "ext:deno_node/internal/errors.ts";
++(function () {
++const { core } = globalThis.__bootstrap;
++const {
++  op_dns_resolve,
++  op_net_get_ips_from_perm_token,
++  op_net_get_system_dns_servers,
++  op_node_getaddrinfo,
++  op_node_getnameinfo,
++} = core.ops;
+ const { isIPv4, isIPv6 } = core.loadExtScript("ext:deno_node/internal/net.ts");
+ const { codeMap } = core.loadExtScript("ext:deno_node/internal_binding/uv.ts");
+ const {
+@@ -39,24 +46,24 @@ const { ares_strerror } = core.loadExtScript(
+   "ext:deno_node/internal_binding/ares.ts",
+ );
+ const { notImplemented } = core.loadExtScript("ext:deno_node/_utils.ts");
+-import {
+-  op_dns_resolve,
+-  op_net_get_ips_from_perm_token,
+-  op_net_get_system_dns_servers,
+-  op_node_getaddrinfo,
+-  op_node_getnameinfo,
+-} from "ext:core/ops";
+ 
+ interface LookupAddress {
+   address: string;
+   family: number;
+ }
+ 
+-export const DNS_ORDER_VERBATIM = 0;
+-export const DNS_ORDER_IPV4_FIRST = 1;
+-export const DNS_ORDER_IPV6_FIRST = 2;
++interface ErrnoException extends Error {
++  errno?: number;
++  code?: string;
++  path?: string;
++  syscall?: string;
++}
++
++const DNS_ORDER_VERBATIM = 0;
++const DNS_ORDER_IPV4_FIRST = 1;
++const DNS_ORDER_IPV6_FIRST = 2;
+ 
+-export class GetAddrInfoReqWrap extends AsyncWrap {
++class GetAddrInfoReqWrap extends AsyncWrap {
+   family!: number;
+   hostname!: string;
+   port: number | undefined;
+@@ -79,7 +86,7 @@ export class GetAddrInfoReqWrap extends AsyncWrap {
+   }
+ }
+ 
+-export function getaddrinfo(
++function getaddrinfo(
+   req: GetAddrInfoReqWrap,
+   hostname: string,
+   family: number,
+@@ -146,7 +153,7 @@ export function getaddrinfo(
+   return 0;
+ }
+ 
+-export class GetNameInfoReqWrap extends AsyncWrap {
++class GetNameInfoReqWrap extends AsyncWrap {
+   address!: string;
+   port!: number;
+ 
+@@ -168,7 +175,7 @@ export class GetNameInfoReqWrap extends AsyncWrap {
+   }
+ }
+ 
+-export function getnameinfo(
++function getnameinfo(
+   req: GetNameInfoReqWrap,
+   address: string,
+   port: number,
+@@ -184,7 +191,7 @@ export function getnameinfo(
+   return 0;
+ }
+ 
+-export class QueryReqWrap extends AsyncWrap {
++class QueryReqWrap extends AsyncWrap {
+   bindingName!: string;
+   hostname!: string;
+   ttl!: boolean;
+@@ -209,7 +216,7 @@ export class QueryReqWrap extends AsyncWrap {
+   }
+ }
+ 
+-export interface ChannelWrapQuery {
++interface ChannelWrapQuery {
+   queryAny(req: QueryReqWrap, name: string): number;
+   queryA(req: QueryReqWrap, name: string): number;
+   queryAaaa(req: QueryReqWrap, name: string): number;
+@@ -240,7 +247,7 @@ function getSystemDnsServers(): [string, number][] {
+   return systemDnsServers;
+ }
+ 
+-export class ChannelWrap extends AsyncWrap implements ChannelWrapQuery {
++class ChannelWrap extends AsyncWrap implements ChannelWrapQuery {
+   #servers: [string, number][] | null = null;
+   #timeout: number;
+   #tries: number;
+@@ -772,20 +779,33 @@ export class ChannelWrap extends AsyncWrap implements ChannelWrapQuery {
+ const DNS_ESETSRVPENDING = -1000;
+ const EMSG_ESETSRVPENDING = "There are pending queries.";
+ 
+-export function strerror(code: number) {
++function strerror(code: number) {
+   return code === DNS_ESETSRVPENDING
+     ? EMSG_ESETSRVPENDING
+     : ares_strerror(code);
+ }
+ 
+-export default {
++return {
+   DNS_ORDER_VERBATIM,
+   DNS_ORDER_IPV4_FIRST,
+   DNS_ORDER_IPV6_FIRST,
+   GetAddrInfoReqWrap,
+   getaddrinfo,
++  GetNameInfoReqWrap,
+   getnameinfo,
+   QueryReqWrap,
+   ChannelWrap,
+   strerror,
++  default: {
++    DNS_ORDER_VERBATIM,
++    DNS_ORDER_IPV4_FIRST,
++    DNS_ORDER_IPV6_FIRST,
++    GetAddrInfoReqWrap,
++    getaddrinfo,
++    getnameinfo,
++    QueryReqWrap,
++    ChannelWrap,
++    strerror,
++  },
+ };
++})();
+diff --git a/ext/node/polyfills/internal_binding/crypto.ts b/ext/node/polyfills/internal_binding/crypto.ts
+index 9098a7c393cf40..6ea280c470ac60 100644
+--- a/ext/node/polyfills/internal_binding/crypto.ts
++++ b/ext/node/polyfills/internal_binding/crypto.ts
+@@ -1,15 +1,21 @@
+ // Copyright 2018-2026 the Deno authors. MIT license.
+ // Copyright Joyent, Inc. and Node.js contributors. All rights reserved. MIT license.
+ 
+-export { timingSafeEqual } from "ext:deno_node/internal_binding/_timingSafeEqual.ts";
+-import { primordials } from "ext:core/mod.js";
++(function () {
++const { core, primordials } = globalThis.__bootstrap;
++const { timingSafeEqual } = core.loadExtScript(
++  "ext:deno_node/internal_binding/_timingSafeEqual.ts",
++);
+ 
+ const { Error } = primordials;
+ 
+-export function getFipsCrypto(): boolean {
++function getFipsCrypto(): boolean {
+   return false;
+ }
+ 
+-export function setFipsCrypto(_fips: boolean) {
++function setFipsCrypto(_fips: boolean) {
+   throw new Error("FIPS mode is not supported in Deno.");
+ }
++
++return { timingSafeEqual, getFipsCrypto, setFipsCrypto };
++})();
+diff --git a/ext/node/polyfills/internal_binding/http_parser.ts b/ext/node/polyfills/internal_binding/http_parser.ts
+index 7827a711dff356..8158f7d99ae22c 100644
+--- a/ext/node/polyfills/internal_binding/http_parser.ts
++++ b/ext/node/polyfills/internal_binding/http_parser.ts
+@@ -22,14 +22,15 @@
+ 
+ // deno-lint-ignore-file no-explicit-any prefer-primordials
+ 
+-import { core } from "ext:core/mod.js";
+-import { HTTPParser as NativeHTTPParser } from "ext:core/ops";
++(function () {
++const { core } = globalThis.__bootstrap;
++const { HTTPParser: NativeHTTPParser } = core.ops;
+ const { Buffer } = core.loadExtScript("ext:deno_node/internal/buffer.mjs");
+ const { AsyncResource } = core.loadExtScript("ext:deno_node/async_hooks.ts");
+ 
+ // Method names indexed by llhttp method enum values.
+ // Order must match llhttp_method_t in llhttp.h.
+-export const methods = [
++const methods = [
+   "DELETE",
+   "GET",
+   "HEAD",
+@@ -67,7 +68,7 @@ export const methods = [
+   "QUERY",
+ ];
+ 
+-export const allMethods = [
++const allMethods = [
+   "DELETE",
+   "GET",
+   "HEAD",
+@@ -136,7 +137,7 @@ const kOnTimeout = 6;
+  * The native parser reads these during execute() and calls them
+  * synchronously from the C callbacks.
+  */
+-export function HTTPParser(this: any, type?: number) {
++function HTTPParser(this: any, type?: number) {
+   // Create the native cppgc parser
+   this._native = new NativeHTTPParser();
+ 
+@@ -313,3 +314,6 @@ HTTPParser.kLenientOptionalCRLFAfterChunk = 128;
+ HTTPParser.kLenientOptionalCRBeforeLF = 256;
+ HTTPParser.kLenientSpacesAfterChunkSize = 512;
+ HTTPParser.kLenientAll = 1023;
++
++return { methods, allMethods, HTTPParser };
++})();
+diff --git a/ext/node/polyfills/internal_binding/mod.ts b/ext/node/polyfills/internal_binding/mod.ts
+index 51e6cd71547d33..eeaac7aa8e1c8a 100644
+--- a/ext/node/polyfills/internal_binding/mod.ts
++++ b/ext/node/polyfills/internal_binding/mod.ts
+@@ -10,11 +10,15 @@ const asyncWrap = core.loadExtScript(
+ const buffer = core.loadExtScript(
+   "ext:deno_node/internal_binding/buffer.ts",
+ );
+-import caresWrap from "ext:deno_node/internal_binding/cares_wrap.ts";
++const { default: caresWrap } = core.loadExtScript(
++  "ext:deno_node/internal_binding/cares_wrap.ts",
++);
+ const constants = core.loadExtScript(
+   "ext:deno_node/internal_binding/constants.ts",
+ );
+-import * as crypto from "ext:deno_node/internal_binding/crypto.ts";
++const crypto = core.loadExtScript(
++  "ext:deno_node/internal_binding/crypto.ts",
++);
+ const pipeWrap = core.loadExtScript(
+   "ext:deno_node/internal_binding/pipe_wrap.ts",
+ );
+@@ -39,7 +43,9 @@ const util = core.loadExtScript(
+   "ext:deno_node/internal_binding/util.ts",
+ );
+ const uvNamespace = core.loadExtScript("ext:deno_node/internal_binding/uv.ts");
+-import * as httpParser from "ext:deno_node/internal_binding/http_parser.ts";
++const httpParser = core.loadExtScript(
++  "ext:deno_node/internal_binding/http_parser.ts",
++);
+ const http2Binding = core.loadExtScript(
+   "ext:deno_node/internal_binding/http2.ts",
+ );
+diff --git a/ext/node/polyfills/internal_binding/udp_wrap.ts b/ext/node/polyfills/internal_binding/udp_wrap.ts
+index d3562a91ea60d9..bdfeaf0da750bc 100644
+--- a/ext/node/polyfills/internal_binding/udp_wrap.ts
++++ b/ext/node/polyfills/internal_binding/udp_wrap.ts
+@@ -47,7 +47,6 @@ const {
+   AsyncWrap,
+   providerType,
+ } = core.loadExtScript("ext:deno_node/internal_binding/async_wrap.ts");
+-import { GetAddrInfoReqWrap } from "ext:deno_node/internal_binding/cares_wrap.ts";
+ const { HandleWrap } = core.loadExtScript(
+   "ext:deno_node/internal_binding/handle_wrap.ts",
+ );
+@@ -150,7 +149,8 @@ export class UDP extends HandleWrap {
+       address: string,
+       family: number,
+     ) => void,
+-  ) => GetAddrInfoReqWrap | Record<string, never>;
++  // deno-lint-ignore no-explicit-any
++  ) => any;
+ 
+   constructor() {
+     super(providerType.UDPWRAP);
+diff --git a/ext/node/polyfills/stream.ts b/ext/node/polyfills/stream.ts
+index 34abef0997d1af..225bb193ddf50e 100644
+--- a/ext/node/polyfills/stream.ts
++++ b/ext/node/polyfills/stream.ts
+@@ -70,7 +70,9 @@ import Duplex from "node:_stream_duplex";
+ import Transform from "node:_stream_transform";
+ import PassThrough from "node:_stream_passthrough";
+ import duplexPair from "ext:deno_node/internal/streams/duplexpair.js";
+-import { addAbortSignal } from "ext:deno_node/internal/streams/add-abort-signal.js";
++const { addAbortSignal } = core.loadExtScript(
++  "ext:deno_node/internal/streams/add-abort-signal.js",
++);
+ const { ERR_ILLEGAL_CONSTRUCTOR } = core.loadExtScript(
+   "ext:deno_node/internal/errors.ts",
+ );
+diff --git a/ext/node/polyfills/tls.ts b/ext/node/polyfills/tls.ts
+index ba356c70b6e151..988a95bd2abe06 100644
+--- a/ext/node/polyfills/tls.ts
++++ b/ext/node/polyfills/tls.ts
+@@ -5,7 +5,9 @@ import { core, primordials } from "ext:core/mod.js";
+ const { notImplemented } = core.loadExtScript("ext:deno_node/_utils.ts");
+ import tlsCommon from "node:_tls_common";
+ import tlsWrap from "node:_tls_wrap";
+-import { convertALPNProtocols } from "ext:deno_node/internal/tls_common.js";
++const { convertALPNProtocols } = core.loadExtScript(
++  "ext:deno_node/internal/tls_common.js",
++);
+ import {
+   op_get_env_no_permission_check,
+   op_get_root_certificates,
+
+From 1e5b6009591f6d5a387feac1a789a632e50dad2f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Thu, 7 May 2026 21:06:34 +0200
+Subject: [PATCH 2/2] chore: format
+
+---
+ ext/node/polyfills/internal_binding/udp_wrap.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ext/node/polyfills/internal_binding/udp_wrap.ts b/ext/node/polyfills/internal_binding/udp_wrap.ts
+index bdfeaf0da750bc..40a04a35799b8b 100644
+--- a/ext/node/polyfills/internal_binding/udp_wrap.ts
++++ b/ext/node/polyfills/internal_binding/udp_wrap.ts
+@@ -149,7 +149,7 @@ export class UDP extends HandleWrap {
+       address: string,
+       family: number,
+     ) => void,
+-  // deno-lint-ignore no-explicit-any
++    // deno-lint-ignore no-explicit-any
+   ) => any;
+ 
+   constructor() {

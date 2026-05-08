@@ -1,0 +1,170 @@
+From 560c119e3dc33b35b9c57172fae521d99c2a1421 Mon Sep 17 00:00:00 2001
+From: David Lord <davidism@gmail.com>
+Date: Sun, 8 Mar 2026 16:05:00 -0700
+Subject: [PATCH] add zizmor to scan workflows
+
+---
+ .github/workflows/lock.yaml       | 10 ++++++----
+ .github/workflows/pre-commit.yaml |  8 ++++++--
+ .github/workflows/publish.yaml    |  8 ++++++--
+ .github/workflows/tests.yaml      | 12 +++++++++++-
+ .github/workflows/zizmor.yaml     | 22 ++++++++++++++++++++++
+ 5 files changed, 51 insertions(+), 9 deletions(-)
+ create mode 100644 .github/workflows/zizmor.yaml
+
+diff --git a/.github/workflows/lock.yaml b/.github/workflows/lock.yaml
+index b464135326..533151a8af 100644
+--- a/.github/workflows/lock.yaml
++++ b/.github/workflows/lock.yaml
+@@ -7,15 +7,17 @@ name: Lock inactive closed issues
+ on:
+   schedule:
+     - cron: '0 0 * * *'
+-permissions:
+-  issues: write
+-  pull-requests: write
+-  discussions: write
++permissions: {}
+ concurrency:
+   group: lock
++  cancel-in-progress: true
+ jobs:
+   lock:
+     runs-on: ubuntu-latest
++    permissions:
++      issues: write
++      pull-requests: write
++      discussions: write
+     steps:
+       - uses: dessant/lock-threads@7266a7ce5c1df01b1c6db85bf8cd86c737dadbe7 # v6.0.0
+         with:
+diff --git a/.github/workflows/pre-commit.yaml b/.github/workflows/pre-commit.yaml
+index e8fd9e39ae..5e332842a0 100644
+--- a/.github/workflows/pre-commit.yaml
++++ b/.github/workflows/pre-commit.yaml
+@@ -3,11 +3,17 @@ on:
+   pull_request:
+   push:
+     branches: [main, stable]
++permissions: {}
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
+ jobs:
+   main:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
++        with:
++          persist-credentials: false
+       - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+         with:
+           enable-cache: true
+@@ -21,5 +27,3 @@ jobs:
+           path: ~/.cache/pre-commit
+           key: pre-commit|${{ hashFiles('pyproject.toml', '.pre-commit-config.yaml') }}
+       - run: uv run --locked --group pre-commit pre-commit run --show-diff-on-failure --color=always --all-files
+-      - uses: pre-commit-ci/lite-action@5d6cc0eb514c891a40562a58a8e71576c5c7fb43 # v1.1.0
+-        if: ${{ !cancelled() }}
+diff --git a/.github/workflows/publish.yaml b/.github/workflows/publish.yaml
+index 6312a345f6..0604387620 100644
+--- a/.github/workflows/publish.yaml
++++ b/.github/workflows/publish.yaml
+@@ -2,6 +2,10 @@ name: Publish
+ on:
+   push:
+     tags: ['*']
++permissions: {}
++concurrency:
++  group: publish-${{ github.event.push.ref }}
++  cancel-in-progress: true
+ jobs:
+   build:
+     runs-on: ubuntu-latest
+@@ -13,7 +17,7 @@ jobs:
+           persist-credentials: false
+       - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+         with:
+-          enable-cache: true
++          enable-cache: false
+           prune-cache: false
+       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+         with:
+@@ -37,7 +41,7 @@ jobs:
+           artifact-ids: ${{ needs.build.outputs.artifact-id }}
+           path: dist/
+       - name: create release
+-        run: gh release create --draft --repo ${{ github.repository }} ${{ github.ref_name }} dist/*
++        run: gh release create --draft --repo ${GITHUB_REPOSITORY} ${GITHUB_REF_NAME} dist/*
+         env:
+           GH_TOKEN: ${{ github.token }}
+   publish-pypi:
+diff --git a/.github/workflows/tests.yaml b/.github/workflows/tests.yaml
+index da744a67f7..d15943541d 100644
+--- a/.github/workflows/tests.yaml
++++ b/.github/workflows/tests.yaml
+@@ -5,6 +5,10 @@ on:
+   push:
+     branches: [main, stable]
+     paths-ignore: ['docs/**', 'README.md']
++permissions: {}
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
+ jobs:
+   tests:
+     name: ${{ matrix.name || matrix.python }}
+@@ -27,6 +31,8 @@ jobs:
+           - {name: Development Versions, python: '3.10', tox: tests-dev}
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
++        with:
++          persist-credentials: false
+       - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+         with:
+           enable-cache: true
+@@ -34,11 +40,15 @@ jobs:
+       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+         with:
+           python-version: ${{ matrix.python }}
+-      - run: uv run --locked tox run -e ${{ matrix.tox || format('py{0}', matrix.python) }}
++      - run: uv run --locked tox run
++        env:
++          TOX_ENV: ${{ matrix.tox || format('py{0}', matrix.python) }}
+   typing:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
++        with:
++          persist-credentials: false
+       - uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+         with:
+           enable-cache: true
+diff --git a/.github/workflows/zizmor.yaml b/.github/workflows/zizmor.yaml
+new file mode 100644
+index 0000000000..fb73f8d755
+--- /dev/null
++++ b/.github/workflows/zizmor.yaml
+@@ -0,0 +1,22 @@
++name: GitHub Actions security analysis with zizmor
++on:
++  pull_request:
++    paths: ["**/*.yaml?"]
++  push:
++    branches: [main, stable]
++    paths: ["**/*.yaml?"]
++permissions: {}
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++jobs:
++  zizmor:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
++        with:
++          persist-credentials: false
++      - uses: zizmorcore/zizmor-action@0dce2577a4760a2749d8cfb7a84b7d5585ebcb7d # v0.5.0
++        with:
++          advanced-security: false
++          annotations: true

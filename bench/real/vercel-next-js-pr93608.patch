@@ -1,0 +1,345 @@
+From 3f8fcd27a98081e5cee64c284748c3ca692aed33 Mon Sep 17 00:00:00 2001
+From: Sebastian Sebbie Silbermann <sebastian.silbermann@vercel.com>
+Date: Thu, 7 May 2026 20:09:43 +0200
+Subject: [PATCH] v15.5.17
+
+---
+ lerna.json                                   |  2 +-
+ packages/create-next-app/package.json        |  2 +-
+ packages/eslint-config-next/package.json     |  4 ++--
+ packages/eslint-plugin-internal/package.json |  2 +-
+ packages/eslint-plugin-next/package.json     |  2 +-
+ packages/font/package.json                   |  2 +-
+ packages/next-bundle-analyzer/package.json   |  2 +-
+ packages/next-codemod/package.json           |  2 +-
+ packages/next-env/package.json               |  2 +-
+ packages/next-mdx/package.json               |  2 +-
+ packages/next-plugin-storybook/package.json  |  2 +-
+ packages/next-polyfill-module/package.json   |  2 +-
+ packages/next-polyfill-nomodule/package.json |  2 +-
+ packages/next-rspack/package.json            |  2 +-
+ packages/next-swc/package.json               |  2 +-
+ packages/next/package.json                   | 14 +++++++-------
+ packages/react-refresh-utils/package.json    |  2 +-
+ packages/third-parties/package.json          |  4 ++--
+ pnpm-lock.yaml                               | 16 ++++++++--------
+ 19 files changed, 34 insertions(+), 34 deletions(-)
+
+diff --git a/lerna.json b/lerna.json
+index 448be60407a4..cbbfd56d35bc 100644
+--- a/lerna.json
++++ b/lerna.json
+@@ -17,5 +17,5 @@
+       "registry": "https://registry.npmjs.org/"
+     }
+   },
+-  "version": "15.5.16"
++  "version": "15.5.17"
+ }
+\ No newline at end of file
+diff --git a/packages/create-next-app/package.json b/packages/create-next-app/package.json
+index 900e8b15e620..18c773e310ad 100644
+--- a/packages/create-next-app/package.json
++++ b/packages/create-next-app/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "create-next-app",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "keywords": [
+     "react",
+     "next",
+diff --git a/packages/eslint-config-next/package.json b/packages/eslint-config-next/package.json
+index fefb04ebceab..920bed94ebc1 100644
+--- a/packages/eslint-config-next/package.json
++++ b/packages/eslint-config-next/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "eslint-config-next",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "ESLint configuration used by Next.js.",
+   "main": "index.js",
+   "license": "MIT",
+@@ -10,7 +10,7 @@
+   },
+   "homepage": "https://nextjs.org/docs/app/api-reference/config/eslint",
+   "dependencies": {
+-    "@next/eslint-plugin-next": "15.5.16",
++    "@next/eslint-plugin-next": "15.5.17",
+     "@rushstack/eslint-patch": "^1.10.3",
+     "@typescript-eslint/eslint-plugin": "^5.4.2 || ^6.0.0 || ^7.0.0 || ^8.0.0",
+     "@typescript-eslint/parser": "^5.4.2 || ^6.0.0 || ^7.0.0 || ^8.0.0",
+diff --git a/packages/eslint-plugin-internal/package.json b/packages/eslint-plugin-internal/package.json
+index 29f8aa04b2fb..c3a181085ce4 100644
+--- a/packages/eslint-plugin-internal/package.json
++++ b/packages/eslint-plugin-internal/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "@next/eslint-plugin-internal",
+   "private": true,
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "ESLint plugin for working on Next.js.",
+   "exports": {
+     ".": "./src/eslint-plugin-internal.js"
+diff --git a/packages/eslint-plugin-next/package.json b/packages/eslint-plugin-next/package.json
+index bc54b0cb72e0..874d952fdf6c 100644
+--- a/packages/eslint-plugin-next/package.json
++++ b/packages/eslint-plugin-next/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/eslint-plugin-next",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "ESLint plugin for Next.js.",
+   "main": "dist/index.js",
+   "types": "dist/index.d.ts",
+diff --git a/packages/font/package.json b/packages/font/package.json
+index d58457e07700..c65aa3aa6a01 100644
+--- a/packages/font/package.json
++++ b/packages/font/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "@next/font",
+   "private": true,
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "repository": {
+     "url": "vercel/next.js",
+     "directory": "packages/font"
+diff --git a/packages/next-bundle-analyzer/package.json b/packages/next-bundle-analyzer/package.json
+index a45c053c80b4..dae7e9c98b6b 100644
+--- a/packages/next-bundle-analyzer/package.json
++++ b/packages/next-bundle-analyzer/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/bundle-analyzer",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "main": "index.js",
+   "types": "index.d.ts",
+   "license": "MIT",
+diff --git a/packages/next-codemod/package.json b/packages/next-codemod/package.json
+index 4bea3d8dac7a..411f50516a4d 100644
+--- a/packages/next-codemod/package.json
++++ b/packages/next-codemod/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/codemod",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "license": "MIT",
+   "repository": {
+     "type": "git",
+diff --git a/packages/next-env/package.json b/packages/next-env/package.json
+index f39fe9f070c9..0c77d9516cb6 100644
+--- a/packages/next-env/package.json
++++ b/packages/next-env/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/env",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "keywords": [
+     "react",
+     "next",
+diff --git a/packages/next-mdx/package.json b/packages/next-mdx/package.json
+index 47965818f090..36864f291aa9 100644
+--- a/packages/next-mdx/package.json
++++ b/packages/next-mdx/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/mdx",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "main": "index.js",
+   "license": "MIT",
+   "repository": {
+diff --git a/packages/next-plugin-storybook/package.json b/packages/next-plugin-storybook/package.json
+index 1a156848e5c3..5a15deabea73 100644
+--- a/packages/next-plugin-storybook/package.json
++++ b/packages/next-plugin-storybook/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/plugin-storybook",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "repository": {
+     "url": "vercel/next.js",
+     "directory": "packages/next-plugin-storybook"
+diff --git a/packages/next-polyfill-module/package.json b/packages/next-polyfill-module/package.json
+index 07a4036ca702..6fd04566435c 100644
+--- a/packages/next-polyfill-module/package.json
++++ b/packages/next-polyfill-module/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/polyfill-module",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "A standard library polyfill for ES Modules supporting browsers (Edge 16+, Firefox 60+, Chrome 61+, Safari 10.1+)",
+   "main": "dist/polyfill-module.js",
+   "license": "MIT",
+diff --git a/packages/next-polyfill-nomodule/package.json b/packages/next-polyfill-nomodule/package.json
+index f1247649d71a..7e1493341458 100644
+--- a/packages/next-polyfill-nomodule/package.json
++++ b/packages/next-polyfill-nomodule/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/polyfill-nomodule",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "A polyfill for non-dead, nomodule browsers.",
+   "main": "dist/polyfill-nomodule.js",
+   "license": "MIT",
+diff --git a/packages/next-rspack/package.json b/packages/next-rspack/package.json
+index d33106405986..302389cb2a30 100644
+--- a/packages/next-rspack/package.json
++++ b/packages/next-rspack/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "next-rspack",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "repository": {
+     "url": "vercel/next.js",
+     "directory": "packages/next-rspack"
+diff --git a/packages/next-swc/package.json b/packages/next-swc/package.json
+index 88a7e963bc00..f51baaded389 100644
+--- a/packages/next-swc/package.json
++++ b/packages/next-swc/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/swc",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "private": true,
+   "files": [
+     "native/"
+diff --git a/packages/next/package.json b/packages/next/package.json
+index 57a9040dde1f..3b998fab3eff 100644
+--- a/packages/next/package.json
++++ b/packages/next/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "next",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "The React Framework",
+   "main": "./dist/server/next.js",
+   "license": "MIT",
+@@ -102,7 +102,7 @@
+     ]
+   },
+   "dependencies": {
+-    "@next/env": "15.5.16",
++    "@next/env": "15.5.17",
+     "@swc/helpers": "0.5.15",
+     "caniuse-lite": "^1.0.30001579",
+     "postcss": "8.4.31",
+@@ -166,11 +166,11 @@
+     "@jest/types": "29.5.0",
+     "@mswjs/interceptors": "0.23.0",
+     "@napi-rs/triples": "1.2.0",
+-    "@next/font": "15.5.16",
+-    "@next/polyfill-module": "15.5.16",
+-    "@next/polyfill-nomodule": "15.5.16",
+-    "@next/react-refresh-utils": "15.5.16",
+-    "@next/swc": "15.5.16",
++    "@next/font": "15.5.17",
++    "@next/polyfill-module": "15.5.17",
++    "@next/polyfill-nomodule": "15.5.17",
++    "@next/react-refresh-utils": "15.5.17",
++    "@next/swc": "15.5.17",
+     "@opentelemetry/api": "1.6.0",
+     "@playwright/test": "1.51.1",
+     "@rspack/core": "1.4.5",
+diff --git a/packages/react-refresh-utils/package.json b/packages/react-refresh-utils/package.json
+index a7e5d4692bf5..c2fd86e191ed 100644
+--- a/packages/react-refresh-utils/package.json
++++ b/packages/react-refresh-utils/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/react-refresh-utils",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "description": "An experimental package providing utilities for React Refresh.",
+   "repository": {
+     "url": "vercel/next.js",
+diff --git a/packages/third-parties/package.json b/packages/third-parties/package.json
+index 2fa83f87253b..6386572a0c76 100644
+--- a/packages/third-parties/package.json
++++ b/packages/third-parties/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@next/third-parties",
+-  "version": "15.5.16",
++  "version": "15.5.17",
+   "repository": {
+     "url": "vercel/next.js",
+     "directory": "packages/third-parties"
+@@ -26,7 +26,7 @@
+     "third-party-capital": "1.0.20"
+   },
+   "devDependencies": {
+-    "next": "15.5.16",
++    "next": "15.5.17",
+     "outdent": "0.8.0",
+     "prettier": "2.5.1",
+     "typescript": "5.8.2"
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 989a40795301..3d2f9d5bb80d 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -857,7 +857,7 @@ importers:
+   packages/eslint-config-next:
+     dependencies:
+       '@next/eslint-plugin-next':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../eslint-plugin-next
+       '@rushstack/eslint-patch':
+         specifier: ^1.10.3
+@@ -927,7 +927,7 @@ importers:
+   packages/next:
+     dependencies:
+       '@next/env':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../next-env
+       '@swc/helpers':
+         specifier: 0.5.15
+@@ -1052,19 +1052,19 @@ importers:
+         specifier: 1.2.0
+         version: 1.2.0
+       '@next/font':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../font
+       '@next/polyfill-module':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../next-polyfill-module
+       '@next/polyfill-nomodule':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../next-polyfill-nomodule
+       '@next/react-refresh-utils':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../react-refresh-utils
+       '@next/swc':
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../next-swc
+       '@opentelemetry/api':
+         specifier: 1.6.0
+@@ -1767,7 +1767,7 @@ importers:
+         version: 1.0.20
+     devDependencies:
+       next:
+-        specifier: 15.5.16
++        specifier: 15.5.17
+         version: link:../next
+       outdent:
+         specifier: 0.8.0

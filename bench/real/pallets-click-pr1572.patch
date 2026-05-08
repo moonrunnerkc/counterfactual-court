@@ -1,0 +1,771 @@
+From 24929b0ea14db37ac33a247544fcd0a83c7ba2fe Mon Sep 17 00:00:00 2001
+From: Craig de Stigter <craig@destigter.nz>
+Date: Fri, 5 Jun 2020 12:08:43 +1200
+Subject: [PATCH 1/7] Refactor `echo_via_pager` to expose file objects
+
+This better exposes the file-like objects yielded by the three private
+pager functions, and also slightly reduces some code duplication
+---
+ src/click/_termui_impl.py | 157 ++++++++++++++++++++------------------
+ 1 file changed, 83 insertions(+), 74 deletions(-)
+
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index ee8225c4c2..e39b05bef7 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -8,6 +8,7 @@
+ 
+ import collections.abc as cabc
+ import contextlib
++import io
+ import math
+ import os
+ import shlex
+@@ -23,7 +24,6 @@
+ from ._compat import CYGWIN
+ from ._compat import get_best_encoding
+ from ._compat import isatty
+-from ._compat import open_stream
+ from ._compat import strip_ansi
+ from ._compat import term_len
+ from ._compat import WIN
+@@ -366,7 +366,20 @@ def generator(self) -> cabc.Iterator[V]:
+             self.render_progress()
+ 
+ 
+-def pager(generator: cabc.Iterable[str], color: bool | None = None) -> None:
++class MaybeStripAnsi(io.TextIOWrapper):
++    def __init__(self, stream: t.IO[bytes], *, color: bool, **kwargs: t.Any):
++        super().__init__(stream, **kwargs)
++        self.color = color
++
++    def write(self, text: str) -> int:
++        if not self.color:
++            text = strip_ansi(text)
++        return super().write(text)
++
++
++def _pager_contextmanager(
++    color: bool | None = None,
++) -> t.ContextManager[t.Tuple[t.BinaryIO, str, bool]]:
+     """Decide what method to use for paging through text."""
+     stdout = _default_text_stdout()
+ 
+@@ -376,50 +389,52 @@ def pager(generator: cabc.Iterable[str], color: bool | None = None) -> None:
+         stdout = StringIO()
+ 
+     if not isatty(sys.stdin) or not isatty(stdout):
+-        return _nullpager(stdout, generator, color)
++        return _nullpager(stdout, color)
+ 
+     # Split and normalize the pager command into parts.
+     pager_cmd_parts = shlex.split(os.environ.get("PAGER", ""), posix=False)
+     if pager_cmd_parts:
+         if WIN:
+-            if _tempfilepager(generator, pager_cmd_parts, color):
+-                return
+-        elif _pipepager(generator, pager_cmd_parts, color):
+-            return
++            return _tempfilepager(pager_cmd_parts, color)
++        return _pipepager(pager_cmd_parts, color)
+ 
+     if os.environ.get("TERM") in ("dumb", "emacs"):
+-        return _nullpager(stdout, generator, color)
+-    if (WIN or sys.platform.startswith("os2")) and _tempfilepager(
+-        generator, ["more"], color
+-    ):
+-        return
+-    if _pipepager(generator, ["less"], color):
+-        return
+-
+-    import tempfile
+-
+-    fd, filename = tempfile.mkstemp()
+-    os.close(fd)
+-    try:
+-        if _pipepager(generator, ["more"], color):
+-            return
+-        return _nullpager(stdout, generator, color)
+-    finally:
+-        os.unlink(filename)
++        return _nullpager(stdout, color)
++    if WIN or sys.platform.startswith("os2"):
++        return _tempfilepager(["more"], color)
++    return _pipepager(["less"], color)
++
++
++@contextlib.contextmanager
++def get_pager_file(color: bool | None = None) -> t.Generator[t.IO, None, None]:
++    """Context manager.
++    Yields a writable file-like object which can be used as an output pager.
++    .. versionadded:: 8.2
++    :param color: controls if the pager supports ANSI colors or not.  The
++                  default is autodetection.
++    """
++    with _pager_contextmanager(color=color) as (stream, encoding, color):
++        if not getattr(stream, "encoding", None):
++            # wrap in a text stream
++            stream = MaybeStripAnsi(stream, color=color, encoding=encoding)
++        yield stream
++        stream.flush()
+ 
+ 
++@contextlib.contextmanager
+ def _pipepager(
+-    generator: cabc.Iterable[str], cmd_parts: list[str], color: bool | None
+-) -> bool:
++    cmd_parts: list[str], color: bool | None = None
++) -> t.Iterator[t.Tuple[t.BinaryIO, str, bool]]:
+     """Page through text by feeding it to another program. Invoking a
+     pager through this might support colors.
+-
+-    Returns `True` if the command was found, `False` otherwise and thus another
+-    pager should be attempted.
+     """
+     # Split the command into the invoked CLI and its parameters.
+     if not cmd_parts:
+-        return False
++        # Return a no-op context manager that yields None
++        @contextlib.contextmanager
++        def _noop():
++            yield None, "", False
++        return _noop()
+ 
+     import shutil
+ 
+@@ -428,7 +443,11 @@ def _pipepager(
+ 
+     cmd_filepath = shutil.which(cmd)
+     if not cmd_filepath:
+-        return False
++        # Return a no-op context manager
++        @contextlib.contextmanager
++        def _noop():
++            yield None, "", False
++        return _noop()
+ 
+     # Produces a normalized absolute path string.
+     # multi-call binaries such as busybox derive their identity from the symlink
+@@ -451,6 +470,9 @@ def _pipepager(
+         elif "r" in less_flags or "R" in less_flags:
+             color = True
+ 
++    if color is None:
++        color = False
++
+     c = subprocess.Popen(
+         [str(cmd_path)] + cmd_params,
+         shell=False,
+@@ -459,13 +481,10 @@ def _pipepager(
+         errors="replace",
+         text=True,
+     )
+-    assert c.stdin is not None
++    stdin = t.cast(t.BinaryIO, c.stdin)
++    encoding = get_best_encoding(stdin)
+     try:
+-        for text in generator:
+-            if not color:
+-                text = strip_ansi(text)
+-
+-            c.stdin.write(text)
++        yield stdin, encoding, color
+     except BrokenPipeError:
+         # In case the pager exited unexpectedly, ignore the broken pipe error.
+         pass
+@@ -479,7 +498,7 @@ def _pipepager(
+     finally:
+         # We must close stdin and wait for the pager to exit before we continue
+         try:
+-            c.stdin.close()
++            stdin.close()
+         # Close implies flush, so it might throw a BrokenPipeError if the pager
+         # process exited already.
+         except BrokenPipeError:
+@@ -501,64 +520,54 @@ def _pipepager(
+             else:
+                 break
+ 
+-    return True
+-
+ 
++@contextlib.contextmanager
+ def _tempfilepager(
+-    generator: cabc.Iterable[str], cmd_parts: list[str], color: bool | None
+-) -> bool:
+-    """Page through text by invoking a program on a temporary file.
+-
+-    Returns `True` if the command was found, `False` otherwise and thus another
+-    pager should be attempted.
+-    """
++    cmd_parts: list[str], color: bool | None = None
++) -> t.Iterator[t.Tuple[t.BinaryIO, str, bool]]:
++    """Page through text by invoking a program on a temporary file."""
+     # Split the command into the invoked CLI and its parameters.
+     if not cmd_parts:
+-        return False
++        # Return a no-op context manager
++        @contextlib.contextmanager
++        def _noop():
++            yield None, "", False
++        return _noop()
+ 
+     import shutil
++    import subprocess
+ 
+     cmd = cmd_parts[0]
+ 
+     cmd_filepath = shutil.which(cmd)
+     if not cmd_filepath:
+-        return False
++        # Return a no-op context manager
++        @contextlib.contextmanager
++        def _noop():
++            yield None, "", False
++        return _noop()
++
+     # Produces a normalized absolute path string.
+     # multi-call binaries such as busybox derive their identity from the symlink
+     # less -> busybox. resolve() causes them to misbehave. (eg. less becomes busybox)
+     cmd_path = Path(cmd_filepath).absolute()
+ 
+-    import subprocess
+     import tempfile
+ 
+-    fd, filename = tempfile.mkstemp()
+-    # TODO: This never terminates if the passed generator never terminates.
+-    text = "".join(generator)
+-    if not color:
+-        text = strip_ansi(text)
+     encoding = get_best_encoding(sys.stdout)
+-    with open_stream(filename, "wb")[0] as f:
+-        f.write(text.encode(encoding))
+-    try:
+-        subprocess.call([str(cmd_path), filename])
+-    except OSError:
+-        # Command not found
+-        pass
+-    finally:
+-        os.close(fd)
+-        os.unlink(filename)
+-
+-    return True
++    with tempfile.NamedTemporaryFile(mode="wb") as f:
++        yield f, encoding, color
++        f.flush()
++        subprocess.call([str(cmd_path), f.name])
+ 
+ 
++@contextlib.contextmanager
+ def _nullpager(
+-    stream: t.TextIO, generator: cabc.Iterable[str], color: bool | None
+-) -> None:
++    stream: t.TextIO, color: bool | None = None
++) -> t.Iterator[t.Tuple[t.BinaryIO, str, bool]]:
+     """Simply print unformatted text.  This is the ultimate fallback."""
+-    for text in generator:
+-        if not color:
+-            text = strip_ansi(text)
+-        stream.write(text)
++    encoding = get_best_encoding(stream)
++    yield stream, encoding, color
+ 
+ 
+ class Editor:
+
+From 580dd44a30f05a0cc1d96eaa08983a4ac961e90a Mon Sep 17 00:00:00 2001
+From: Craig de Stigter <craig@destigter.nz>
+Date: Fri, 5 Jun 2020 12:31:37 +1200
+Subject: [PATCH 2/7] Add file-like pager: `click.get_pager_file()`
+
+---
+ CHANGES.rst           |  2 ++
+ docs/api.md           |  4 ++++
+ docs/utils.md         | 13 +++++++++++++
+ src/click/__init__.py |  1 +
+ src/click/_compat.py  |  4 ++++
+ src/click/termui.py   | 24 ++++++++++++++++++++----
+ 6 files changed, 44 insertions(+), 4 deletions(-)
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 774d596749..d5d6e11458 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -158,6 +158,8 @@ Released 2025-05-10
+         allows the user to search for future output of the generator when
+         using less and then aborting the program using ctrl-c.
+ 
++-   Add ``click.get_pager_file`` for file-like access to an output
++    pager. :pr:`1572`
+ -   ``deprecated: bool | str`` can now be used on options and arguments. This
+     previously was only available for ``Command``. The message can now also be
+     customised by using a ``str`` instead of a ``bool``. :issue:`2263` :pr:`2271`
+diff --git a/docs/api.md b/docs/api.md
+index 5ecb483506..ea46bc9051 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -72,6 +72,10 @@ classes and functions.
+ .. autofunction:: echo_via_pager
+ ```
+ 
++```{eval-rst}
++.. autofunction:: get_pager_file
++```
++
+ ```{eval-rst}
+ .. autofunction:: prompt
+ ```
+diff --git a/docs/utils.md b/docs/utils.md
+index c0a3f96b77..8afe390792 100644
+--- a/docs/utils.md
++++ b/docs/utils.md
+@@ -110,6 +110,19 @@ you can pass a generator (or generator function) instead of a string:
+         click.echo_via_pager(_generate_output())
+ ```
+ 
++For more complex programs, which can't easily use a simple generator, you
++can get access to a writable file-like object for the pager, and write to
++that instead:
++
++```{eval-rst}
++.. click:example::
++    @click.command()
++    def less():
++        with click.get_pager_file() as pager:
++            for idx in range(50000):
++                print(idx, file=pager)
++```
++
+ ## Screen Clearing
+ 
+ ```{versionadded} 2.0
+diff --git a/src/click/__init__.py b/src/click/__init__.py
+index 1aa547c57a..3f33665232 100644
+--- a/src/click/__init__.py
++++ b/src/click/__init__.py
+@@ -41,6 +41,7 @@
+ from .termui import confirm as confirm
+ from .termui import echo_via_pager as echo_via_pager
+ from .termui import edit as edit
++from .termui import get_pager_file as get_pager_file
+ from .termui import getchar as getchar
+ from .termui import launch as launch
+ from .termui import pause as pause
+diff --git a/src/click/_compat.py b/src/click/_compat.py
+index f2726b93af..134c4f3893 100644
+--- a/src/click/_compat.py
++++ b/src/click/_compat.py
+@@ -502,6 +502,10 @@ def should_strip_ansi(
+     if color is None:
+         if stream is None:
+             stream = sys.stdin
++        elif hasattr(stream, "color"):
++            # ._termui_impl.MaybeStripAnsi handles stripping ansi itself,
++            # so we don't need to strip it here
++            return False
+         return not isatty(stream) and not _is_jupyter_kernel_output(stream)
+     return not color
+ 
+diff --git a/src/click/termui.py b/src/click/termui.py
+index 2e98a0771c..f8fe219ed9 100644
+--- a/src/click/termui.py
++++ b/src/click/termui.py
+@@ -258,6 +258,23 @@ def confirm(
+     return rv
+ 
+ 
++def get_pager_file(color=None):
++    """Context manager.
++
++    Yields a writable file-like object which can be used as an output pager.
++
++    .. versionadded:: 8.2
++
++    :param color: controls if the pager supports ANSI colors or not.  The
++                  default is autodetection.
++    """
++    from ._termui_impl import get_pager_file
++
++    color = resolve_color_default(color)
++
++    return get_pager_file(color=color)
++
++
+ def echo_via_pager(
+     text_or_generator: cabc.Iterable[str] | t.Callable[[], cabc.Iterable[str]] | str,
+     color: bool | None = None,
+@@ -273,7 +290,6 @@ def echo_via_pager(
+     :param color: controls if the pager supports ANSI colors or not.  The
+                   default is autodetection.
+     """
+-    color = resolve_color_default(color)
+ 
+     if inspect.isgeneratorfunction(text_or_generator):
+         i = t.cast("t.Callable[[], cabc.Iterable[str]]", text_or_generator)()
+@@ -285,9 +301,9 @@ def echo_via_pager(
+     # convert every element of i to a text type if necessary
+     text_generator = (el if isinstance(el, str) else str(el) for el in i)
+ 
+-    from ._termui_impl import pager
+-
+-    return pager(itertools.chain(text_generator, "\n"), color)
++    with get_pager_file(color=color) as pager:
++        for text in itertools.chain(text_generator, "\n"):
++            pager.write(text)
+ 
+ 
+ @t.overload
+
+From 155c331cd6b03d1d026e1c2d9e295d407bf461b8 Mon Sep 17 00:00:00 2001
+From: "pre-commit-ci-lite[bot]"
+ <117423508+pre-commit-ci-lite[bot]@users.noreply.github.com>
+Date: Thu, 27 Nov 2025 00:42:21 +0000
+Subject: [PATCH 3/7] [pre-commit.ci lite] apply automatic fixes
+
+---
+ src/click/_termui_impl.py | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index e39b05bef7..a9e771799f 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -379,7 +379,7 @@ def write(self, text: str) -> int:
+ 
+ def _pager_contextmanager(
+     color: bool | None = None,
+-) -> t.ContextManager[t.Tuple[t.BinaryIO, str, bool]]:
++) -> t.ContextManager[tuple[t.BinaryIO, str, bool]]:
+     """Decide what method to use for paging through text."""
+     stdout = _default_text_stdout()
+ 
+@@ -424,7 +424,7 @@ def get_pager_file(color: bool | None = None) -> t.Generator[t.IO, None, None]:
+ @contextlib.contextmanager
+ def _pipepager(
+     cmd_parts: list[str], color: bool | None = None
+-) -> t.Iterator[t.Tuple[t.BinaryIO, str, bool]]:
++) -> t.Iterator[tuple[t.BinaryIO, str, bool]]:
+     """Page through text by feeding it to another program. Invoking a
+     pager through this might support colors.
+     """
+@@ -434,6 +434,7 @@ def _pipepager(
+         @contextlib.contextmanager
+         def _noop():
+             yield None, "", False
++
+         return _noop()
+ 
+     import shutil
+@@ -447,6 +448,7 @@ def _noop():
+         @contextlib.contextmanager
+         def _noop():
+             yield None, "", False
++
+         return _noop()
+ 
+     # Produces a normalized absolute path string.
+@@ -524,7 +526,7 @@ def _noop():
+ @contextlib.contextmanager
+ def _tempfilepager(
+     cmd_parts: list[str], color: bool | None = None
+-) -> t.Iterator[t.Tuple[t.BinaryIO, str, bool]]:
++) -> t.Iterator[tuple[t.BinaryIO, str, bool]]:
+     """Page through text by invoking a program on a temporary file."""
+     # Split the command into the invoked CLI and its parameters.
+     if not cmd_parts:
+@@ -532,6 +534,7 @@ def _tempfilepager(
+         @contextlib.contextmanager
+         def _noop():
+             yield None, "", False
++
+         return _noop()
+ 
+     import shutil
+@@ -545,6 +548,7 @@ def _noop():
+         @contextlib.contextmanager
+         def _noop():
+             yield None, "", False
++
+         return _noop()
+ 
+     # Produces a normalized absolute path string.
+@@ -564,7 +568,7 @@ def _noop():
+ @contextlib.contextmanager
+ def _nullpager(
+     stream: t.TextIO, color: bool | None = None
+-) -> t.Iterator[t.Tuple[t.BinaryIO, str, bool]]:
++) -> t.Iterator[tuple[t.BinaryIO, str, bool]]:
+     """Simply print unformatted text.  This is the ultimate fallback."""
+     encoding = get_best_encoding(stream)
+     yield stream, encoding, color
+
+From 47a105318bb9b6ae53db7687af738f428798379a Mon Sep 17 00:00:00 2001
+From: Craig de Stigter <craig@destigter.nz>
+Date: Thu, 27 Nov 2025 14:43:15 +1300
+Subject: [PATCH 4/7] Fix confusing bug in _tempfilepager on windows
+
+---
+ src/click/_termui_impl.py | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index a9e771799f..7f977a6e0a 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -559,10 +559,17 @@ def _noop():
+     import tempfile
+ 
+     encoding = get_best_encoding(sys.stdout)
+-    with tempfile.NamedTemporaryFile(mode="wb") as f:
++    # On Windows, NamedTemporaryFile cannot be opened by another process
++    # while Python still has it open, so we use delete=False and clean up manually
++    # rather than using a contextmanager here.
++    f = tempfile.NamedTemporaryFile(mode="wb", delete=False)
++    try:
+         yield f, encoding, color
+         f.flush()
++        f.close()
+         subprocess.call([str(cmd_path), f.name])
++    finally:
++        os.unlink(f.name)
+ 
+ 
+ @contextlib.contextmanager
+
+From 504331e9ca4277d190d11c86ba341ddc63271e48 Mon Sep 17 00:00:00 2001
+From: Craig de Stigter <craig@destigter.nz>
+Date: Thu, 27 Nov 2025 14:57:40 +1300
+Subject: [PATCH 5/7] Fix type hints for get_pager_file components
+
+---
+ src/click/_termui_impl.py | 56 +++++++++++++++++----------------------
+ src/click/termui.py       |  4 ++-
+ 2 files changed, 27 insertions(+), 33 deletions(-)
+
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index 7f977a6e0a..995cd682be 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -379,7 +379,7 @@ def write(self, text: str) -> int:
+ 
+ def _pager_contextmanager(
+     color: bool | None = None,
+-) -> t.ContextManager[tuple[t.BinaryIO, str, bool]]:
++) -> t.ContextManager[tuple[t.BinaryIO | t.TextIO, str, bool]]:
+     """Decide what method to use for paging through text."""
+     stdout = _default_text_stdout()
+ 
+@@ -406,7 +406,7 @@ def _pager_contextmanager(
+ 
+ 
+ @contextlib.contextmanager
+-def get_pager_file(color: bool | None = None) -> t.Generator[t.IO, None, None]:
++def get_pager_file(color: bool | None = None) -> t.Generator[t.TextIO, None, None]:
+     """Context manager.
+     Yields a writable file-like object which can be used as an output pager.
+     .. versionadded:: 8.2
+@@ -416,26 +416,23 @@ def get_pager_file(color: bool | None = None) -> t.Generator[t.IO, None, None]:
+     with _pager_contextmanager(color=color) as (stream, encoding, color):
+         if not getattr(stream, "encoding", None):
+             # wrap in a text stream
+-            stream = MaybeStripAnsi(stream, color=color, encoding=encoding)
+-        yield stream
++            stream = MaybeStripAnsi(t.cast(t.BinaryIO, stream), color=color, encoding=encoding)
++        yield t.cast(t.TextIO, stream)
+         stream.flush()
+ 
+ 
+ @contextlib.contextmanager
+ def _pipepager(
+     cmd_parts: list[str], color: bool | None = None
+-) -> t.Iterator[tuple[t.BinaryIO, str, bool]]:
++) -> t.Iterator[tuple[t.BinaryIO | t.TextIO, str, bool]]:
+     """Page through text by feeding it to another program. Invoking a
+     pager through this might support colors.
+     """
+     # Split the command into the invoked CLI and its parameters.
+     if not cmd_parts:
+-        # Return a no-op context manager that yields None
+-        @contextlib.contextmanager
+-        def _noop():
+-            yield None, "", False
+-
+-        return _noop()
++        stdout = _default_text_stdout() or StringIO()
++        yield stdout, "utf-8", False
++        return
+ 
+     import shutil
+ 
+@@ -444,12 +441,9 @@ def _noop():
+ 
+     cmd_filepath = shutil.which(cmd)
+     if not cmd_filepath:
+-        # Return a no-op context manager
+-        @contextlib.contextmanager
+-        def _noop():
+-            yield None, "", False
+-
+-        return _noop()
++        stdout = _default_text_stdout() or StringIO()
++        yield stdout, "utf-8", False
++        return
+ 
+     # Produces a normalized absolute path string.
+     # multi-call binaries such as busybox derive their identity from the symlink
+@@ -526,16 +520,13 @@ def _noop():
+ @contextlib.contextmanager
+ def _tempfilepager(
+     cmd_parts: list[str], color: bool | None = None
+-) -> t.Iterator[tuple[t.BinaryIO, str, bool]]:
++) -> t.Iterator[tuple[t.BinaryIO | t.TextIO, str, bool]]:
+     """Page through text by invoking a program on a temporary file."""
+     # Split the command into the invoked CLI and its parameters.
+     if not cmd_parts:
+-        # Return a no-op context manager
+-        @contextlib.contextmanager
+-        def _noop():
+-            yield None, "", False
+-
+-        return _noop()
++        stdout = _default_text_stdout() or StringIO()
++        yield stdout, "utf-8", False
++        return
+ 
+     import shutil
+     import subprocess
+@@ -544,12 +535,9 @@ def _noop():
+ 
+     cmd_filepath = shutil.which(cmd)
+     if not cmd_filepath:
+-        # Return a no-op context manager
+-        @contextlib.contextmanager
+-        def _noop():
+-            yield None, "", False
+-
+-        return _noop()
++        stdout = _default_text_stdout() or StringIO()
++        yield stdout, "utf-8", False
++        return
+ 
+     # Produces a normalized absolute path string.
+     # multi-call binaries such as busybox derive their identity from the symlink
+@@ -559,12 +547,14 @@ def _noop():
+     import tempfile
+ 
+     encoding = get_best_encoding(sys.stdout)
++    if color is None:
++        color = False
+     # On Windows, NamedTemporaryFile cannot be opened by another process
+     # while Python still has it open, so we use delete=False and clean up manually
+     # rather than using a contextmanager here.
+     f = tempfile.NamedTemporaryFile(mode="wb", delete=False)
+     try:
+-        yield f, encoding, color
++        yield t.cast(t.BinaryIO, f), encoding, color
+         f.flush()
+         f.close()
+         subprocess.call([str(cmd_path), f.name])
+@@ -575,9 +565,11 @@ def _noop():
+ @contextlib.contextmanager
+ def _nullpager(
+     stream: t.TextIO, color: bool | None = None
+-) -> t.Iterator[tuple[t.BinaryIO, str, bool]]:
++) -> t.Iterator[tuple[t.TextIO, str, bool]]:
+     """Simply print unformatted text.  This is the ultimate fallback."""
+     encoding = get_best_encoding(stream)
++    if color is None:
++        color = False
+     yield stream, encoding, color
+ 
+ 
+diff --git a/src/click/termui.py b/src/click/termui.py
+index f8fe219ed9..99014b0faf 100644
+--- a/src/click/termui.py
++++ b/src/click/termui.py
+@@ -258,7 +258,9 @@ def confirm(
+     return rv
+ 
+ 
+-def get_pager_file(color=None):
++def get_pager_file(
++    color: bool | None = None,
++) -> t.ContextManager[t.TextIO]:
+     """Context manager.
+ 
+     Yields a writable file-like object which can be used as an output pager.
+
+From b83771aacf0ea433458e94c013a5767a6ee716cb Mon Sep 17 00:00:00 2001
+From: "pre-commit-ci-lite[bot]"
+ <117423508+pre-commit-ci-lite[bot]@users.noreply.github.com>
+Date: Thu, 27 Nov 2025 01:58:28 +0000
+Subject: [PATCH 6/7] [pre-commit.ci lite] apply automatic fixes
+
+---
+ src/click/_termui_impl.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index 995cd682be..01818c1161 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -416,7 +416,9 @@ def get_pager_file(color: bool | None = None) -> t.Generator[t.TextIO, None, Non
+     with _pager_contextmanager(color=color) as (stream, encoding, color):
+         if not getattr(stream, "encoding", None):
+             # wrap in a text stream
+-            stream = MaybeStripAnsi(t.cast(t.BinaryIO, stream), color=color, encoding=encoding)
++            stream = MaybeStripAnsi(
++                t.cast(t.BinaryIO, stream), color=color, encoding=encoding
++            )
+         yield t.cast(t.TextIO, stream)
+         stream.flush()
+ 
+
+From fe53f5c39c4f2956ca82609f6e01c66dfe9d7871 Mon Sep 17 00:00:00 2001
+From: Craig de Stigter <craig@destigter.nz>
+Date: Fri, 28 Nov 2025 10:09:36 +1300
+Subject: [PATCH 7/7] pager: Fix ansi chars not being stripped correctly
+
+MaybeStripAnsi wasn't correctly applied to text streams, meaning that
+when called with `LESS=-c PAGER=less` (ie LESS is defined but doesn't
+include `-R`) the ansi chars should be stripped but weren't.
+
+This fixes the problem by ensuring text streams get unwrapped and
+re-wrapped in a MaybeStripAnsi object (and also get flushed correctly
+when handling KeyboardInterrupt)
+---
+ src/click/_termui_impl.py | 21 ++++++++++++++-------
+ 1 file changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index 01818c1161..ee1eb41105 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -414,13 +414,20 @@ def get_pager_file(color: bool | None = None) -> t.Generator[t.TextIO, None, Non
+                   default is autodetection.
+     """
+     with _pager_contextmanager(color=color) as (stream, encoding, color):
+-        if not getattr(stream, "encoding", None):
+-            # wrap in a text stream
+-            stream = MaybeStripAnsi(
+-                t.cast(t.BinaryIO, stream), color=color, encoding=encoding
+-            )
+-        yield t.cast(t.TextIO, stream)
+-        stream.flush()
++        if not isinstance(stream, MaybeStripAnsi):
++            if hasattr(stream, "buffer"):
++                # Real TextIO with buffer - unwrap and wrap in MaybeStripAnsi
++                stream = MaybeStripAnsi(stream.buffer, color=color, encoding=encoding)
++            elif not getattr(stream, "encoding", None):
++                # BinaryIO - wrap directly in MaybeStripAnsi
++                stream = MaybeStripAnsi(stream, color=color, encoding=encoding)
++            else:
++                # StringIO - add .color attribute only, no ANSI stripping
++                stream.color = color  # type: ignore[attr-defined]
++        try:
++            yield t.cast(t.TextIO, stream)
++        finally:
++            stream.flush()
+ 
+ 
+ @contextlib.contextmanager

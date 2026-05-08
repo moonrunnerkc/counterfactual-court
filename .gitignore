@@ -39,3 +39,4 @@ pnpm-debug.log*
 # Temp
 *.tmp
 .tmp/
+bench/cache/

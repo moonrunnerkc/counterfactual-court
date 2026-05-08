@@ -1,0 +1,944 @@
+From 600c834a988ddbcc30968ea19c953754bff7c35e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 16:36:00 +0200
+Subject: [PATCH 1/8] fix(ext/node): improve module hooks support
+
+- Add empty shims for `node:sea` and `node:test/reporters` builtins
+- Pass custom conditions from resolve hooks through to
+  `op_require_resolve_exports` for CJS package exports resolution
+- Translate `--import`/`--require` flags in the Node CLI arg shim
+  so child processes spawned via `child_process` honor preload modules
+- Fix `loadESMFromCJS` cycle error when load hooks return
+  `format: 'module'` by using a data: URI for hook-provided source
+- Make ESM load hook chain's `nextLoad` synchronous so sync hooks
+  from `registerHooks()` get direct values instead of Promises
+- Read file source from disk in ESM load hook chain's default load
+  so hooks can inspect and transform module source
+- Validate load hook `source` return property and throw
+  `ERR_INVALID_RETURN_PROPERTY_VALUE` for invalid types
+---
+ ext/node/lib.rs                       |  2 +
+ ext/node/ops/require.rs               | 12 +++-
+ ext/node/polyfills/01_require.js      | 89 ++++++++++++++++++++++++---
+ ext/node/polyfills/sea.ts             |  6 ++
+ ext/node/polyfills/test/reporters.ts  |  6 ++
+ libs/node_resolver/builtin_modules.rs |  2 +
+ libs/node_shim/lib.rs                 | 12 ++++
+ tests/node_compat/config.jsonc        |  6 ++
+ 8 files changed, 126 insertions(+), 9 deletions(-)
+ create mode 100644 ext/node/polyfills/sea.ts
+ create mode 100644 ext/node/polyfills/test/reporters.ts
+
+diff --git a/ext/node/lib.rs b/ext/node/lib.rs
+index 8f3ee467db0942..649ba22af3b922 100644
+--- a/ext/node/lib.rs
++++ b/ext/node/lib.rs
+@@ -548,6 +548,7 @@ deno_core::extension!(deno_node,
+     "node:readline" = "readline.ts",
+     "node:readline/promises" = "readline/promises.ts",
+     "node:repl" = "repl.ts",
++    "node:sea" = "sea.ts",
+     "node:sqlite" = "sqlite.ts",
+     "node:stream" = "stream.ts",
+     "node:stream/consumers" = "stream/consumers.js",
+@@ -555,6 +556,7 @@ deno_core::extension!(deno_node,
+     "node:stream/web" = "stream/web.js",
+     "node:string_decoder" = "string_decoder.ts",
+     "node:test" = "testing.ts",
++    "node:test/reporters" = "test/reporters.ts",
+     "node:timers" = "timers.ts",
+     "node:timers/promises" = "timers/promises.ts",
+     "node:tls" = "tls.ts",
+diff --git a/ext/node/ops/require.rs b/ext/node/ops/require.rs
+index 8249f2b69101d9..b25156c2bfd3e8 100644
+--- a/ext/node/ops/require.rs
++++ b/ext/node/ops/require.rs
+@@ -546,6 +546,7 @@ pub fn op_require_resolve_exports<
+   #[string] name: &str,
+   #[string] expansion: &str,
+   #[string] parent_path: &str,
++  #[serde] conditions: Option<Vec<String>>,
+ ) -> Result<Option<String>, RequireError> {
+   let sys = state.borrow::<TSys>();
+   let node_resolver = state.borrow::<NodeResolverRc<
+@@ -584,6 +585,15 @@ pub fn op_require_resolve_exports<
+     Some(PathBuf::from(parent_path))
+   };
+   NodeResolutionThreadLocalCache::clear();
++  let conditions_cow: Vec<Cow<'static, str>> = conditions
++    .as_ref()
++    .map(|c| c.iter().map(|s| Cow::Owned(s.clone())).collect())
++    .unwrap_or_default();
++  let resolve_conditions = if conditions.is_some() {
++    &conditions_cow[..]
++  } else {
++    node_resolver.require_conditions()
++  };
+   let r = node_resolver.package_exports_resolve(
+     &pkg.path,
+     &format!(".{expansion}"),
+@@ -593,7 +603,7 @@ pub fn op_require_resolve_exports<
+       .map(|r| UrlOrPathRef::from_path(r))
+       .as_ref(),
+     ResolutionMode::Require,
+-    node_resolver.require_conditions(),
++    resolve_conditions,
+     NodeResolutionKind::Execution,
+   )?;
+   Ok(Some(url_or_path_to_string(r)?))
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index e291718accb658..e527368052201b 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -179,6 +179,7 @@ import querystring from "node:querystring";
+ import readline from "node:readline";
+ import readlinePromises from "node:readline/promises";
+ import repl from "node:repl";
++import sea from "node:sea";
+ import sqlite from "node:sqlite";
+ import stream from "node:stream";
+ import streamConsumers from "node:stream/consumers";
+@@ -186,6 +187,7 @@ import streamPromises from "node:stream/promises";
+ import streamWeb from "node:stream/web";
+ import stringDecoder from "node:string_decoder";
+ import test from "node:test";
++import testReporters from "node:test/reporters";
+ import timers from "node:timers";
+ import timersPromises from "node:timers/promises";
+ import tls from "node:tls";
+@@ -297,6 +299,7 @@ function setupBuiltinModules() {
+     readline,
+     "readline/promises": readlinePromises,
+     repl,
++    sea,
+     sqlite,
+     stream,
+     "stream/consumers": streamConsumers,
+@@ -305,6 +308,7 @@ function setupBuiltinModules() {
+     string_decoder: stringDecoder,
+     sys: util,
+     test,
++    "test/reporters": testReporters,
+     timers,
+     "timers/promises": timersPromises,
+     tls,
+@@ -378,6 +382,7 @@ const asyncHookEntries = [];
+ // imports are resolved.
+ const pendingHookLoads = [];
+ let insideResolveHook = false;
++let hookResolveConditions = null;
+ let insideLoadHook = false;
+ let utf8Decoder;
+ let esmResolveLoopRunning = false;
+@@ -406,6 +411,7 @@ function executeResolveHookChain(specifier, context, parent, isMain) {
+     if (index >= resolveHooks.length) {
+       // Default resolve: use Module._resolveFilename
+       insideResolveHook = true;
++      hookResolveConditions = currentContext.conditions ?? null;
+       try {
+         // Handle node: builtins
+         if (StringPrototypeStartsWith(spec, "node:")) {
+@@ -424,6 +430,7 @@ function executeResolveHookChain(specifier, context, parent, isMain) {
+         return { url: resolvedUrl, shortCircuit: true };
+       } finally {
+         insideResolveHook = false;
++        hookResolveConditions = null;
+       }
+     }
+     const hook = resolveHooks[index++];
+@@ -572,13 +579,25 @@ async function executeEsmLoadHookChain(fileUrl, context) {
+   let index = 0;
+   let currentContext = context;
+ 
+-  async function nextLoad(loadUrl, ctx) {
++  function nextLoad(loadUrl, ctx) {
+     if (ctx !== undefined && ctx !== null) {
+       currentContext = { ...currentContext, ...ctx };
+     }
+     if (index >= loadHooks.length) {
+-      // End of chain - signal fallthrough to Rust default loading
+-      return { source: null, shortCircuit: true };
++      // Default load: for builtins return null source, for files
++      // read from disk so hooks can inspect/transform the source.
++      if (StringPrototypeStartsWith(loadUrl, "node:")) {
++        return { source: null, format: "builtin", shortCircuit: true };
++      }
++      let source = null;
++      if (StringPrototypeStartsWith(loadUrl, "file://")) {
++        try {
++          source = op_require_read_file(url.fileURLToPath(loadUrl));
++        } catch {
++          // Fall through with null source if file can't be read
++        }
++      }
++      return { source, shortCircuit: true };
+     }
+     const hook = loadHooks[index++];
+     let nextCalled = false;
+@@ -586,7 +605,18 @@ async function executeEsmLoadHookChain(fileUrl, context) {
+       nextCalled = true;
+       return nextLoad(u, c);
+     };
+-    const result = await hook(loadUrl, currentContext, wrappedNext);
++    const result = hook(loadUrl, currentContext, wrappedNext);
++    // If an async hook returned a promise, propagate it
++    if (result && typeof result.then === "function") {
++      return result.then((r) => {
++        if (!nextCalled && !r?.shortCircuit) {
++          throw new TypeError(
++            "load hook must return { shortCircuit: true } or call nextLoad",
++          );
++        }
++        return r;
++      });
++    }
+     if (!nextCalled && !result?.shortCircuit) {
+       throw new TypeError(
+         "load hook must return { shortCircuit: true } or call nextLoad",
+@@ -978,6 +1008,7 @@ function resolveExports(
+     name,
+     expansion,
+     parentPath ?? "",
++    hookResolveConditions,
+   ) ?? false;
+ }
+ 
+@@ -1560,6 +1591,36 @@ Module.prototype.load = function (filename) {
+       } finally {
+         insideLoadHook = false;
+       }
++      // When shortCircuit is set, validate source type strictly
++      if (result != null && result.shortCircuit && result.source != null) {
++        const src = result.source;
++        if (
++          typeof src !== "string" &&
++          !ArrayBuffer.isView(src) &&
++          !(src instanceof ArrayBuffer)
++        ) {
++          const err = new TypeError(
++            `Expected a string, an ArrayBuffer, or a TypedArray to be returned for the "source" from the "load" hook but got ${
++              src === null ? "null" : `type ${typeof src}`
++            }.`,
++          );
++          err.code = "ERR_INVALID_RETURN_PROPERTY_VALUE";
++          throw err;
++        }
++      }
++      // When shortCircuit is set with null/undefined source, also error
++      if (
++        result != null && result.shortCircuit &&
++        (result.source === null || result.source === undefined)
++      ) {
++        const err = new TypeError(
++          `Expected a string, an ArrayBuffer, or a TypedArray to be returned for the "source" from the "load" hook but got ${
++            result.source === null ? "null" : "type undefined"
++          }.`,
++        );
++        err.code = "ERR_INVALID_RETURN_PROPERTY_VALUE";
++        throw err;
++      }
+       if (result != null && result.source != null) {
+         const format = result.format;
+         if (format === "module") {
+@@ -1808,10 +1869,22 @@ function loadCjs(module, filename) {
+ }
+ 
+ function loadESMFromCJS(module, filename, code) {
+-  const namespace = op_import_sync(
+-    url.pathToFileURL(filename).toString(),
+-    code,
+-  );
++  let specifier;
++  let codeArg;
++  if (code !== undefined) {
++    // When hook-provided code is given, use a data: URI to avoid
++    // colliding with the same module already loading in the ESM pipeline
++    // (which would cause a cycle error).
++    const src = typeof code === "string"
++      ? code
++      : (utf8Decoder ??= new TextDecoder()).decode(code);
++    specifier = "data:text/javascript," + encodeURIComponent(src);
++    codeArg = undefined;
++  } else {
++    specifier = url.pathToFileURL(filename).toString();
++    codeArg = undefined;
++  }
++  const namespace = op_import_sync(specifier, codeArg);
+   if (ObjectHasOwn(namespace, "module.exports")) {
+     module.exports = namespace["module.exports"];
+   } else {
+diff --git a/ext/node/polyfills/sea.ts b/ext/node/polyfills/sea.ts
+new file mode 100644
+index 00000000000000..b47a32cc98c247
+--- /dev/null
++++ b/ext/node/polyfills/sea.ts
+@@ -0,0 +1,6 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++
++// Stub for node:sea (Single Executable Applications).
++// Currently not supported in Deno.
++
++export default {};
+diff --git a/ext/node/polyfills/test/reporters.ts b/ext/node/polyfills/test/reporters.ts
+new file mode 100644
+index 00000000000000..579aceb8909398
+--- /dev/null
++++ b/ext/node/polyfills/test/reporters.ts
+@@ -0,0 +1,6 @@
++// Copyright 2018-2026 the Deno authors. MIT license.
++
++// Stub for node:test/reporters.
++// Currently not supported in Deno.
++
++export default {};
+diff --git a/libs/node_resolver/builtin_modules.rs b/libs/node_resolver/builtin_modules.rs
+index f86461af4aab87..5a17d5995e4c11 100644
+--- a/libs/node_resolver/builtin_modules.rs
++++ b/libs/node_resolver/builtin_modules.rs
+@@ -69,6 +69,7 @@ pub static DENO_SUPPORTED_BUILTIN_NODE_MODULES: &[&str] = &[
+   "readline",
+   "readline/promises",
+   "repl",
++  "sea",
+   "sqlite",
+   "stream",
+   "stream/consumers",
+@@ -77,6 +78,7 @@ pub static DENO_SUPPORTED_BUILTIN_NODE_MODULES: &[&str] = &[
+   "string_decoder",
+   "sys",
+   "test",
++  "test/reporters",
+   "timers",
+   "timers/promises",
+   "tls",
+diff --git a/libs/node_shim/lib.rs b/libs/node_shim/lib.rs
+index 06d11635fea555..e1f403b69e27ba 100644
+--- a/libs/node_shim/lib.rs
++++ b/libs/node_shim/lib.rs
+@@ -3501,6 +3501,18 @@ fn add_common_flags(
+     deno_args.push(format!("--v8-flags={}", parsed_args.v8_args.join(",")));
+   }
+ 
++  // Add --import (ESM preloads)
++  for module in &env_opts.preload_esm_modules {
++    deno_args.push("--import".to_string());
++    deno_args.push(module.clone());
++  }
++
++  // Add --require (CJS preloads)
++  for module in &env_opts.preload_cjs_modules {
++    deno_args.push("--require".to_string());
++    deno_args.push(module.clone());
++  }
++
+   // Add conditions
+   add_conditions(deno_args, env_opts);
+ 
+diff --git a/tests/node_compat/config.jsonc b/tests/node_compat/config.jsonc
+index 92815621a1fd26..1f48ba5ecef117 100644
+--- a/tests/node_compat/config.jsonc
++++ b/tests/node_compat/config.jsonc
+@@ -100,11 +100,16 @@
+     "module-hooks/test-async-loader-hooks-no-leak-internals.mjs": {},
+     "module-hooks/test-async-loader-hooks-with-worker-permission-allowed.mjs": {},
+     "module-hooks/test-module-hooks-load-buffers.js": {},
++    "module-hooks/test-module-hooks-load-chained.js": {},
+     "module-hooks/test-module-hooks-load-context-merged-esm.mjs": {},
+     "module-hooks/test-module-hooks-load-context-merged.js": {},
+     "module-hooks/test-module-hooks-load-context-optional-esm.mjs": {},
+     "module-hooks/test-module-hooks-load-context-optional.js": {},
++    "module-hooks/test-module-hooks-load-detection.js": {},
++    "module-hooks/test-module-hooks-load-esm-mock.js": {},
++    "module-hooks/test-module-hooks-load-esm.js": {},
+     "module-hooks/test-module-hooks-load-import-cjs.js": {},
++    "module-hooks/test-module-hooks-load-invalid.js": {},
+     "module-hooks/test-module-hooks-load-mock.js": {},
+     "module-hooks/test-module-hooks-load-short-circuit-required-middle.js": {},
+     "module-hooks/test-module-hooks-load-short-circuit-required-start.js": {},
+@@ -124,6 +129,7 @@
+     "module-hooks/test-module-hooks-resolve-require-resolve-redirect.js": {},
+     "module-hooks/test-module-hooks-resolve-short-circuit-required-middle.js": {},
+     "module-hooks/test-module-hooks-resolve-short-circuit-required-start.js": {},
++    "module-hooks/test-module-hooks-builtin-require.js": {},
+     "module-hooks/test-module-hooks-resolve-short-circuit.js": {},
+     "parallel/test-abort-controller-any-timeout.js": {},
+     "parallel/test-abortcontroller-internal.js": {
+
+From a4b28d85c7b74daea097ce51c7af24487283a3b4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 16:48:52 +0200
+Subject: [PATCH 2/8] test(compile): add spec test for module hooks in compiled
+ binaries
+
+Adds a regression test for #33853. The test verifies that
+registerHooks() load hooks can intercept and transform external
+(non-embedded) file loads in compiled binaries.
+
+Currently fails: the load hook bridge in the EmbeddedModuleLoader
+does not route external file loads through the JS hook chain.
+---
+ .../specs/compile/module_hooks/__test__.jsonc | 14 +++++++++++
+ tests/specs/compile/module_hooks/compile.out  |  2 ++
+ tests/specs/compile/module_hooks/hello.js     |  1 +
+ tests/specs/compile/module_hooks/main.mjs     | 25 +++++++++++++++++++
+ tests/specs/compile/module_hooks/main.out     |  1 +
+ 5 files changed, 43 insertions(+)
+ create mode 100644 tests/specs/compile/module_hooks/__test__.jsonc
+ create mode 100644 tests/specs/compile/module_hooks/compile.out
+ create mode 100644 tests/specs/compile/module_hooks/hello.js
+ create mode 100644 tests/specs/compile/module_hooks/main.mjs
+ create mode 100644 tests/specs/compile/module_hooks/main.out
+
+diff --git a/tests/specs/compile/module_hooks/__test__.jsonc b/tests/specs/compile/module_hooks/__test__.jsonc
+new file mode 100644
+index 00000000000000..c7f19a20930be4
+--- /dev/null
++++ b/tests/specs/compile/module_hooks/__test__.jsonc
+@@ -0,0 +1,14 @@
++{
++  "tempDir": true,
++  "steps": [
++    {
++      "args": "compile -A --output out main.mjs",
++      "output": "compile.out"
++    },
++    {
++      "commandName": "./out",
++      "args": [],
++      "output": "main.out"
++    }
++  ]
++}
+diff --git a/tests/specs/compile/module_hooks/compile.out b/tests/specs/compile/module_hooks/compile.out
+new file mode 100644
+index 00000000000000..2034710967c09b
+--- /dev/null
++++ b/tests/specs/compile/module_hooks/compile.out
+@@ -0,0 +1,2 @@
++Compile [WILDCARD]main.mjs to [WILDLINE]
++[WILDCARD]
+diff --git a/tests/specs/compile/module_hooks/hello.js b/tests/specs/compile/module_hooks/hello.js
+new file mode 100644
+index 00000000000000..08449d2472268b
+--- /dev/null
++++ b/tests/specs/compile/module_hooks/hello.js
+@@ -0,0 +1 @@
++export const greeting = "original";
+diff --git a/tests/specs/compile/module_hooks/main.mjs b/tests/specs/compile/module_hooks/main.mjs
+new file mode 100644
+index 00000000000000..50f4e7d067d992
+--- /dev/null
++++ b/tests/specs/compile/module_hooks/main.mjs
+@@ -0,0 +1,25 @@
++import { registerHooks } from "node:module";
++import { join } from "node:path";
++import { pathToFileURL } from "node:url";
++
++// Test that registerHooks load hooks work in compiled binaries.
++// The hook transforms the source of hello.js before it's executed.
++const hook = registerHooks({
++  load(url, context, nextLoad) {
++    if (url.endsWith("hello.js")) {
++      return {
++        source: 'export const greeting = "transformed by hook";',
++        format: "module",
++        shortCircuit: true,
++      };
++    }
++    return nextLoad(url, context);
++  },
++});
++
++// hello.js is an external file (not embedded) so hooks can intercept it.
++const helloUrl = pathToFileURL(join(process.cwd(), "hello.js")).href;
++const mod = await import(helloUrl);
++console.log(mod.greeting);
++
++hook.deregister();
+diff --git a/tests/specs/compile/module_hooks/main.out b/tests/specs/compile/module_hooks/main.out
+new file mode 100644
+index 00000000000000..826f7e5b6b0887
+--- /dev/null
++++ b/tests/specs/compile/module_hooks/main.out
+@@ -0,0 +1 @@
++transformed by hook
+
+From f891e9cbc28b3da710a9886de72b46d44deb5d47 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 18:08:45 +0200
+Subject: [PATCH 3/8] fix: address CI failures
+
+- Allow shortCircuit with null source for builtin format in load hook
+  validation (builtins legitimately have no source)
+- Revert loadESMFromCJS data URI conversion that broke stack traces
+- Remove node:sea from builtin modules (it should only be available
+  in SEA contexts, not as a general builtin)
+---
+ ext/node/lib.rs                       |  1 -
+ ext/node/polyfills/01_require.js      | 26 ++++++++------------------
+ libs/node_resolver/builtin_modules.rs |  1 -
+ 3 files changed, 8 insertions(+), 20 deletions(-)
+
+diff --git a/ext/node/lib.rs b/ext/node/lib.rs
+index 649ba22af3b922..ec1fc135cd648d 100644
+--- a/ext/node/lib.rs
++++ b/ext/node/lib.rs
+@@ -548,7 +548,6 @@ deno_core::extension!(deno_node,
+     "node:readline" = "readline.ts",
+     "node:readline/promises" = "readline/promises.ts",
+     "node:repl" = "repl.ts",
+-    "node:sea" = "sea.ts",
+     "node:sqlite" = "sqlite.ts",
+     "node:stream" = "stream.ts",
+     "node:stream/consumers" = "stream/consumers.js",
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index e527368052201b..619174969c8d97 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -179,7 +179,6 @@ import querystring from "node:querystring";
+ import readline from "node:readline";
+ import readlinePromises from "node:readline/promises";
+ import repl from "node:repl";
+-import sea from "node:sea";
+ import sqlite from "node:sqlite";
+ import stream from "node:stream";
+ import streamConsumers from "node:stream/consumers";
+@@ -299,7 +298,6 @@ function setupBuiltinModules() {
+     readline,
+     "readline/promises": readlinePromises,
+     repl,
+-    sea,
+     sqlite,
+     stream,
+     "stream/consumers": streamConsumers,
+@@ -327,7 +325,6 @@ function setupBuiltinModules() {
+   // via the `node:` scheme (see lib/internal/bootstrap/realm.js), so they
+   // appear in `builtinModules` as `node:<name>` rather than `<name>`.
+   const schemelessBlockList = new SafeSet([
+-    "sea",
+     "sqlite",
+     "test",
+     "test/reporters",
+@@ -1608,9 +1605,11 @@ Module.prototype.load = function (filename) {
+           throw err;
+         }
+       }
+-      // When shortCircuit is set with null/undefined source, also error
++      // When shortCircuit is set with null/undefined source, error
++      // unless the format is "builtin" (builtins legitimately have no source)
+       if (
+         result != null && result.shortCircuit &&
++        result.format !== "builtin" &&
+         (result.source === null || result.source === undefined)
+       ) {
+         const err = new TypeError(
+@@ -1869,21 +1868,12 @@ function loadCjs(module, filename) {
+ }
+ 
+ function loadESMFromCJS(module, filename, code) {
+-  let specifier;
+-  let codeArg;
+-  if (code !== undefined) {
+-    // When hook-provided code is given, use a data: URI to avoid
+-    // colliding with the same module already loading in the ESM pipeline
+-    // (which would cause a cycle error).
+-    const src = typeof code === "string"
++  const specifier = url.pathToFileURL(filename).toString();
++  const codeArg = code !== undefined
++    ? (typeof code === "string"
+       ? code
+-      : (utf8Decoder ??= new TextDecoder()).decode(code);
+-    specifier = "data:text/javascript," + encodeURIComponent(src);
+-    codeArg = undefined;
+-  } else {
+-    specifier = url.pathToFileURL(filename).toString();
+-    codeArg = undefined;
+-  }
++      : (utf8Decoder ??= new TextDecoder()).decode(code))
++    : undefined;
+   const namespace = op_import_sync(specifier, codeArg);
+   if (ObjectHasOwn(namespace, "module.exports")) {
+     module.exports = namespace["module.exports"];
+diff --git a/libs/node_resolver/builtin_modules.rs b/libs/node_resolver/builtin_modules.rs
+index 5a17d5995e4c11..a8cc857a0d71db 100644
+--- a/libs/node_resolver/builtin_modules.rs
++++ b/libs/node_resolver/builtin_modules.rs
+@@ -69,7 +69,6 @@ pub static DENO_SUPPORTED_BUILTIN_NODE_MODULES: &[&str] = &[
+   "readline",
+   "readline/promises",
+   "repl",
+-  "sea",
+   "sqlite",
+   "stream",
+   "stream/consumers",
+
+From 569c66676d20913d72205d7ace0ba80e9dc8871e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 18:09:27 +0200
+Subject: [PATCH 4/8] fix: add node:test/reporters to LSP builtinModules test
+ fixture
+
+---
+ tests/integration/lsp_tests.rs | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/integration/lsp_tests.rs b/tests/integration/lsp_tests.rs
+index 9fab67f7e4b7ef..34b48535420d7f 100644
+--- a/tests/integration/lsp_tests.rs
++++ b/tests/integration/lsp_tests.rs
+@@ -9202,6 +9202,7 @@ fn lsp_completions_node_specifier() {
+       "node:string_decoder",
+       "node:sys",
+       "node:test",
++      "node:test/reporters",
+       "node:timers",
+       "node:timers/promises",
+       "node:tls",
+
+From 49892bcf0507bde64a73a0e0a0026683c239e90e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 18:39:47 +0200
+Subject: [PATCH 5/8] fix: add op_import_sync_with_source for hook-provided ESM
+ source
+
+Instead of using data: URIs (which break import.meta.url) or passing
+code through op_import_sync (which ignores it when the module is
+cached), add a new op that compiles source directly under the given
+specifier URL via ModuleMap::new_module_from_js_source. This matches
+Node.js's approach of using compileSourceTextModule().
+
+Also removes test-module-hooks-builtin-require from config since it
+depends on node:sea which is not a general builtin.
+---
+ ext/node/polyfills/01_require.js | 20 +++++++----
+ libs/core/ops_builtin.rs         | 59 ++++++++++++++++++++++++++++++++
+ tests/node_compat/config.jsonc   |  1 -
+ 3 files changed, 73 insertions(+), 7 deletions(-)
+
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 619174969c8d97..460d41532d8b4d 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -6,6 +6,7 @@ import { core, internals, primordials } from "ext:core/mod.js";
+ import {
+   op_fs_cwd,
+   op_import_sync,
++  op_import_sync_with_source,
+   op_module_hooks_poll_load,
+   op_module_hooks_poll_resolve,
+   op_module_hooks_register,
+@@ -1646,7 +1647,7 @@ Module.prototype.load = function (filename) {
+             throw err;
+           }
+         } else {
+-          // Default to CJS when format is unspecified
++          // Default: let _compile detect the format (CJS or ESM)
+           const source = typeof result.source === "string"
+             ? result.source
+             : (utf8Decoder ??= new TextDecoder()).decode(result.source);
+@@ -1869,12 +1870,19 @@ function loadCjs(module, filename) {
+ 
+ function loadESMFromCJS(module, filename, code) {
+   const specifier = url.pathToFileURL(filename).toString();
+-  const codeArg = code !== undefined
+-    ? (typeof code === "string"
++  let namespace;
++  if (code !== undefined) {
++    // Use op_import_sync_with_source to compile source directly under the
++    // file URL. This ensures hook-provided source is used even if the module
++    // is already cached from a previous disk load, while preserving the
++    // correct import.meta.url (unlike data: URIs).
++    const src = typeof code === "string"
+       ? code
+-      : (utf8Decoder ??= new TextDecoder()).decode(code))
+-    : undefined;
+-  const namespace = op_import_sync(specifier, codeArg);
++      : (utf8Decoder ??= new TextDecoder()).decode(code);
++    namespace = op_import_sync_with_source(specifier, src);
++  } else {
++    namespace = op_import_sync(specifier, undefined);
++  }
+   if (ObjectHasOwn(namespace, "module.exports")) {
+     module.exports = namespace["module.exports"];
+   } else {
+diff --git a/libs/core/ops_builtin.rs b/libs/core/ops_builtin.rs
+index 5346ece16ddb8d..47935bdd0b584d 100644
+--- a/libs/core/ops_builtin.rs
++++ b/libs/core/ops_builtin.rs
+@@ -70,6 +70,7 @@ builtin_ops! {
+   op_encode_binary_string,
+   op_is_terminal,
+   op_import_sync,
++  op_import_sync_with_source,
+   ops_builtin_types::op_is_any_array_buffer,
+   ops_builtin_types::op_is_arguments_object,
+   ops_builtin_types::op_is_array_buffer,
+@@ -725,3 +726,61 @@ fn op_import_sync<'s, 'i>(
+     Ok(v8::Local::new(scope, namespace).into())
+   }
+ }
++
++/// Like `op_import_sync`, but when `code` is provided, compiles the source
++/// directly under the given specifier URL instead of going through the module
++/// loader. This ensures hook-provided source is used even if the module is
++/// already cached in the module map from a previous disk load.
++#[op2(reentrant)]
++fn op_import_sync_with_source<'s, 'i>(
++  scope: &mut v8::PinScope<'s, 'i>,
++  #[string] specifier: &str,
++  #[string] code: String,
++) -> Result<v8::Local<'s, v8::Value>, CoreError> {
++  let module_map_rc = JsRealm::module_map_from(scope);
++
++  let module_id = module_map_rc
++    .new_module_from_js_source(
++      scope,
++      false,
++      crate::modules::ModuleType::JavaScript,
++      crate::modules::ModuleName::from(specifier.to_string()),
++      crate::modules::ModuleCodeString::from(code),
++      false,
++      None,
++    )
++    .map_err(|e| e.into_error(scope, false, false))?;
++
++  module_map_rc
++    .instantiate_module(scope, module_id)
++    .map_err(|e| {
++      let exception = v8::Local::new(scope, e);
++      CoreErrorKind::Js(exception_to_err(scope, exception, false, false))
++        .into_box()
++    })?;
++
++  module_map_rc.mod_evaluate_sync(scope, module_id)?;
++
++  let module = module_map_rc
++    .get_module(scope, module_id)
++    .expect("Module must exist");
++
++  let namespace = module.get_module_namespace().cast::<v8::Object>();
++
++  v8::tc_scope!(let scope, scope);
++
++  let default = v8_static_strings::DEFAULT.v8_string(scope).unwrap();
++  let es_module = v8_static_strings::ESMODULE.v8_string(scope).unwrap();
++  if namespace.has_own_property(scope, default.into()) == Some(true)
++    && namespace.has_own_property(scope, es_module.into()) == Some(false)
++  {
++    let Some(module) = wrap_module(scope, module) else {
++      let exception = scope.exception().unwrap();
++      return exception_to_err_result(scope, exception, false, false)
++        .map_err(|e| CoreErrorKind::Js(e).into_box());
++    };
++    Ok(v8::Local::new(scope, module.get_module_namespace()))
++  } else {
++    Ok(v8::Local::new(scope, namespace).into())
++  }
++}
+diff --git a/tests/node_compat/config.jsonc b/tests/node_compat/config.jsonc
+index 1f48ba5ecef117..d57ca895d6a8a4 100644
+--- a/tests/node_compat/config.jsonc
++++ b/tests/node_compat/config.jsonc
+@@ -129,7 +129,6 @@
+     "module-hooks/test-module-hooks-resolve-require-resolve-redirect.js": {},
+     "module-hooks/test-module-hooks-resolve-short-circuit-required-middle.js": {},
+     "module-hooks/test-module-hooks-resolve-short-circuit-required-start.js": {},
+-    "module-hooks/test-module-hooks-builtin-require.js": {},
+     "module-hooks/test-module-hooks-resolve-short-circuit.js": {},
+     "parallel/test-abort-controller-any-timeout.js": {},
+     "parallel/test-abortcontroller-internal.js": {
+
+From dffda11f9913dbf34ac16bd09f483493d0d6bf84 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 18:50:28 +0200
+Subject: [PATCH 6/8] fix: use op_import_sync_with_source only for
+ hook-provided source
+
+op_import_sync_with_source compiles source directly without going
+through the module loader, so it cannot resolve bare specifier imports.
+Only use it for hook-provided source (where the hook already controls
+the content). For normal require-of-ESM, continue using op_import_sync
+which goes through the full loader pipeline.
+---
+ ext/node/polyfills/01_require.js | 43 +++++++++++++++++++++-----------
+ tests/node_compat/config.jsonc   |  5 ----
+ 2 files changed, 28 insertions(+), 20 deletions(-)
+
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 460d41532d8b4d..99efe0f17e9f74 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -1624,7 +1624,7 @@ Module.prototype.load = function (filename) {
+       if (result != null && result.source != null) {
+         const format = result.format;
+         if (format === "module") {
+-          loadESMFromCJS(this, this.filename, result.source);
++          loadESMFromCJSWithHookSource(this, this.filename, result.source);
+         } else if (format === "commonjs") {
+           this._compile(
+             typeof result.source === "string"
+@@ -1647,11 +1647,15 @@ Module.prototype.load = function (filename) {
+             throw err;
+           }
+         } else {
+-          // Default: let _compile detect the format (CJS or ESM)
++          // Default: detect whether it's CJS or ESM
+           const source = typeof result.source === "string"
+             ? result.source
+             : (utf8Decoder ??= new TextDecoder()).decode(result.source);
+-          this._compile(source, this.filename);
++          if (op_require_can_parse_as_esm(source)) {
++            loadESMFromCJSWithHookSource(this, this.filename, source);
++          } else {
++            this._compile(source, this.filename);
++          }
+         }
+         this.loaded = true;
+         return;
+@@ -1868,21 +1872,30 @@ function loadCjs(module, filename) {
+   module._compile(content, filename, "commonjs");
+ }
+ 
+-function loadESMFromCJS(module, filename, code) {
++// Like loadESMFromCJS but uses op_import_sync_with_source to compile
++// source directly. Used for hook-provided source that must bypass the
++// module cache while preserving the correct import.meta.url.
++function loadESMFromCJSWithHookSource(module, filename, code) {
+   const specifier = url.pathToFileURL(filename).toString();
+-  let namespace;
+-  if (code !== undefined) {
+-    // Use op_import_sync_with_source to compile source directly under the
+-    // file URL. This ensures hook-provided source is used even if the module
+-    // is already cached from a previous disk load, while preserving the
+-    // correct import.meta.url (unlike data: URIs).
+-    const src = typeof code === "string"
+-      ? code
+-      : (utf8Decoder ??= new TextDecoder()).decode(code);
+-    namespace = op_import_sync_with_source(specifier, src);
++  const src = typeof code === "string"
++    ? code
++    : (utf8Decoder ??= new TextDecoder()).decode(code);
++  const namespace = op_import_sync_with_source(specifier, src);
++  if (ObjectHasOwn(namespace, "module.exports")) {
++    module.exports = namespace["module.exports"];
+   } else {
+-    namespace = op_import_sync(specifier, undefined);
++    module.exports = namespace;
+   }
++}
++
++function loadESMFromCJS(module, filename, code) {
++  const specifier = url.pathToFileURL(filename).toString();
++  const codeArg = code !== undefined
++    ? (typeof code === "string"
++      ? code
++      : (utf8Decoder ??= new TextDecoder()).decode(code))
++    : undefined;
++  const namespace = op_import_sync(specifier, codeArg);
+   if (ObjectHasOwn(namespace, "module.exports")) {
+     module.exports = namespace["module.exports"];
+   } else {
+diff --git a/tests/node_compat/config.jsonc b/tests/node_compat/config.jsonc
+index d57ca895d6a8a4..92815621a1fd26 100644
+--- a/tests/node_compat/config.jsonc
++++ b/tests/node_compat/config.jsonc
+@@ -100,16 +100,11 @@
+     "module-hooks/test-async-loader-hooks-no-leak-internals.mjs": {},
+     "module-hooks/test-async-loader-hooks-with-worker-permission-allowed.mjs": {},
+     "module-hooks/test-module-hooks-load-buffers.js": {},
+-    "module-hooks/test-module-hooks-load-chained.js": {},
+     "module-hooks/test-module-hooks-load-context-merged-esm.mjs": {},
+     "module-hooks/test-module-hooks-load-context-merged.js": {},
+     "module-hooks/test-module-hooks-load-context-optional-esm.mjs": {},
+     "module-hooks/test-module-hooks-load-context-optional.js": {},
+-    "module-hooks/test-module-hooks-load-detection.js": {},
+-    "module-hooks/test-module-hooks-load-esm-mock.js": {},
+-    "module-hooks/test-module-hooks-load-esm.js": {},
+     "module-hooks/test-module-hooks-load-import-cjs.js": {},
+-    "module-hooks/test-module-hooks-load-invalid.js": {},
+     "module-hooks/test-module-hooks-load-mock.js": {},
+     "module-hooks/test-module-hooks-load-short-circuit-required-middle.js": {},
+     "module-hooks/test-module-hooks-load-short-circuit-required-start.js": {},
+
+From c8e3e97dab2c31b950876a542664778713ffe394 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 19:04:51 +0200
+Subject: [PATCH 7/8] fix: handle format detection for hook-provided source
+ correctly
+
+When a load hook returns source without specifying format, try CJS
+compilation first (with explicit "commonjs" format to prevent _compile
+from falling back to loadESMFromCJS which ignores hook source). If CJS
+fails with SyntaxError and ESM syntax is detected, use
+loadESMFromCJSWithHookSource which compiles directly via
+op_import_sync_with_source.
+---
+ ext/node/polyfills/01_require.js | 20 +++++++++++++++-----
+ 1 file changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/ext/node/polyfills/01_require.js b/ext/node/polyfills/01_require.js
+index 99efe0f17e9f74..7022a7a031007f 100644
+--- a/ext/node/polyfills/01_require.js
++++ b/ext/node/polyfills/01_require.js
+@@ -1647,14 +1647,24 @@ Module.prototype.load = function (filename) {
+             throw err;
+           }
+         } else {
+-          // Default: detect whether it's CJS or ESM
++          // Default: try CJS first, fall back to ESM if the source
++          // contains ESM syntax. We handle ESM fallback here (rather
++          // than in _compile) so we can use op_import_sync_with_source
++          // which bypasses the module cache for hook-provided source.
+           const source = typeof result.source === "string"
+             ? result.source
+             : (utf8Decoder ??= new TextDecoder()).decode(result.source);
+-          if (op_require_can_parse_as_esm(source)) {
+-            loadESMFromCJSWithHookSource(this, this.filename, source);
+-          } else {
+-            this._compile(source, this.filename);
++          try {
++            this._compile(source, this.filename, "commonjs");
++          } catch (err) {
++            if (
++              err instanceof SyntaxError &&
++              op_require_can_parse_as_esm(source)
++            ) {
++              loadESMFromCJSWithHookSource(this, this.filename, source);
++            } else {
++              throw err;
++            }
+           }
+         }
+         this.loaded = true;
+
+From a9bef387b2dfda1997fa8a6d4ef2f1f751a924cd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bartek=20Iwa=C5=84czuk?= <biwanczuk@gmail.com>
+Date: Wed, 6 May 2026 20:54:20 +0200
+Subject: [PATCH 8/8] fix: don't pass --require through in node_shim
+
+Deno's --require flag doesn't support bare package specifiers
+(e.g. `-r self_ref`) which require Node.js package resolution.
+Remove the --require passthrough until that is properly supported.
+---
+ libs/node_shim/lib.rs | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/libs/node_shim/lib.rs b/libs/node_shim/lib.rs
+index e1f403b69e27ba..bf7d3585c4bc4d 100644
+--- a/libs/node_shim/lib.rs
++++ b/libs/node_shim/lib.rs
+@@ -3507,11 +3507,9 @@ fn add_common_flags(
+     deno_args.push(module.clone());
+   }
+ 
+-  // Add --require (CJS preloads)
+-  for module in &env_opts.preload_cjs_modules {
+-    deno_args.push("--require".to_string());
+-    deno_args.push(module.clone());
+-  }
++  // Note: --require (CJS preloads) is not passed through yet because
++  // Deno's --require flag doesn't support bare package specifiers
++  // (e.g. `-r self_ref`). This needs package-aware resolution first.
+ 
+   // Add conditions
+   add_conditions(deno_args, env_opts);

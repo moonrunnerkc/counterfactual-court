@@ -1,0 +1,127 @@
+From ec311440b0c5d25b978aa49a9622e52a1dcfafe8 Mon Sep 17 00:00:00 2001
+From: Ivan Motiienko <1161259+katsanva@users.noreply.github.com>
+Date: Sat, 2 Nov 2024 14:02:16 +0100
+Subject: [PATCH 1/2] fix: correct support for AbortSignal:timeout()
+
+---
+ source/core/index.ts |  7 +++++-
+ test/abort.ts        | 51 ++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 57 insertions(+), 1 deletion(-)
+
+diff --git a/source/core/index.ts b/source/core/index.ts
+index 842bc4def..12c98d213 100644
+--- a/source/core/index.ts
++++ b/source/core/index.ts
+@@ -264,7 +264,12 @@ export default class Request extends Duplex implements RequestEvents<Request> {
+ 
+ 		if (this.options.signal) {
+ 			const abort = () => {
+-				this.destroy(new AbortError(this));
++				// See https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static#return_value
++				if (this.options.signal?.reason?.name === 'TimeoutError') {
++					this.destroy(new TimeoutError(this.options.signal.reason, this.timings!, this));
++				} else {
++					this.destroy(new AbortError(this));
++				}
+ 			};
+ 
+ 			if (this.options.signal.aborted) {
+diff --git a/test/abort.ts b/test/abort.ts
+index e9d151400..53738c3a9 100644
+--- a/test/abort.ts
++++ b/test/abort.ts
+@@ -324,3 +324,54 @@ test('support setting the signal as a default option', async t => {
+ 
+ 	t.true(signalHandlersRemoved(), 'Abort signal event handlers not removed');
+ });
++
++// See https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static
++test('support AbortSignal.timeout()', async t => {
++	const signal = AbortSignal.timeout(1);
++
++	const p = got('http://example.com', {signal});
++
++	await t.throwsAsync(p, {
++		code: 23,
++		message: 'The operation was aborted due to timeout',
++	});
++});
++
++test('support AbortSignal.timeout() without user abort', async t => {
++	const {controller, signalHandlersRemoved} = createAbortController();
++	const timeoutSignal = AbortSignal.timeout(1);
++	const signal = AbortSignal.any([
++		controller.signal,
++		timeoutSignal,
++	]);
++	const p = got('http://example.com', {signal});
++
++	await t.throwsAsync(p, {
++		code: 23,
++		message: 'The operation was aborted due to timeout',
++	});
++
++	t.true(signalHandlersRemoved(), 'Abort signal event handlers not removed');
++});
++
++test('support AbortSignal.timeout() with user abort', async t => {
++	const {controller, signalHandlersRemoved} = createAbortController();
++	const timeoutSignal = AbortSignal.timeout(1000);
++	const signal = AbortSignal.any([
++		controller.signal,
++		timeoutSignal,
++	]);
++
++	setTimeout(() => {
++		controller.abort();
++	}, 10);
++
++	const p = got('http://example.com', {signal});
++
++	await t.throwsAsync(p, {
++		code: 'ERR_ABORTED',
++		message: 'This operation was aborted.',
++	});
++
++	t.true(signalHandlersRemoved(), 'Abort signal event handlers not removed');
++});
+
+From 0f49611aa7c148c1ef6d2be3147404b03c726366 Mon Sep 17 00:00:00 2001
+From: Ivan Motiienko <1161259+katsanva@users.noreply.github.com>
+Date: Sun, 3 Nov 2024 12:10:45 +0100
+Subject: [PATCH 2/2] chore: use const for TimeoutError code in tests
+
+---
+ test/abort.ts | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/test/abort.ts b/test/abort.ts
+index 53738c3a9..960593bd0 100644
+--- a/test/abort.ts
++++ b/test/abort.ts
+@@ -325,6 +325,7 @@ test('support setting the signal as a default option', async t => {
+ 	t.true(signalHandlersRemoved(), 'Abort signal event handlers not removed');
+ });
+ 
++const timeoutErrorCode = 23;
+ // See https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static
+ test('support AbortSignal.timeout()', async t => {
+ 	const signal = AbortSignal.timeout(1);
+@@ -332,7 +333,7 @@ test('support AbortSignal.timeout()', async t => {
+ 	const p = got('http://example.com', {signal});
+ 
+ 	await t.throwsAsync(p, {
+-		code: 23,
++		code: timeoutErrorCode,
+ 		message: 'The operation was aborted due to timeout',
+ 	});
+ });
+@@ -347,7 +348,7 @@ test('support AbortSignal.timeout() without user abort', async t => {
+ 	const p = got('http://example.com', {signal});
+ 
+ 	await t.throwsAsync(p, {
+-		code: 23,
++		code: timeoutErrorCode,
+ 		message: 'The operation was aborted due to timeout',
+ 	});
+ 

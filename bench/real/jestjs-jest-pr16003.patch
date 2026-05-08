@@ -1,0 +1,432 @@
+From 4711be9976144613401c8da70366e5b1f0299045 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Thu, 19 Mar 2026 21:17:02 +0530
+Subject: [PATCH 01/14] fix(jest-circus): handle undefined asyncError when
+ formatting thrown non-Error values
+
+---
+ .../jest-circus/src/__tests__/getError.test.ts | 18 ++++++++++++++++++
+ .../jest-circus/src/formatNodeAssertErrors.ts  |  7 ++++++-
+ packages/jest-circus/src/utils.ts              |  9 +++++++--
+ 3 files changed, 31 insertions(+), 3 deletions(-)
+ create mode 100644 packages/jest-circus/src/__tests__/getError.test.ts
+
+diff --git a/packages/jest-circus/src/__tests__/getError.test.ts b/packages/jest-circus/src/__tests__/getError.test.ts
+new file mode 100644
+index 000000000000..207405b90e79
+--- /dev/null
++++ b/packages/jest-circus/src/__tests__/getError.test.ts
+@@ -0,0 +1,18 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++
++import {_getError} from '../utils';
++
++test('handles plain object error with undefined asyncError', () => {
++  const errors = [{status: 403, message: 'Forbidden'}, undefined] as any;
++
++  const result = _getError(errors);
++
++  expect(result).toBeInstanceOf(Error);
++  expect(result.message).toContain('Forbidden');
++});
+\ No newline at end of file
+diff --git a/packages/jest-circus/src/formatNodeAssertErrors.ts b/packages/jest-circus/src/formatNodeAssertErrors.ts
+index c295a93344bb..e032227e0491 100644
+--- a/packages/jest-circus/src/formatNodeAssertErrors.ts
++++ b/packages/jest-circus/src/formatNodeAssertErrors.ts
+@@ -52,12 +52,17 @@ const formatNodeAssertErrors = (
+           error = asyncError;
+         } else if (originalError.stack) {
+           error = originalError;
+-        } else {
++        } else if (asyncError) {
+           error = asyncError;
+ 
+           error.message =
+             originalError.message ||
+             `thrown: ${prettyFormat(originalError, {maxDepth: 3})}`;
++        } else {
++          error = new Error(
++            originalError.message ||
++              `thrown: ${prettyFormat(originalError, {maxDepth: 3})}`,
++          );
+         }
+       } else {
+         error = errors;
+diff --git a/packages/jest-circus/src/utils.ts b/packages/jest-circus/src/utils.ts
+index 81d477290cdd..1f42a5fada6a 100644
+--- a/packages/jest-circus/src/utils.ts
++++ b/packages/jest-circus/src/utils.ts
+@@ -433,9 +433,14 @@ const _getError = (
+     return error;
+   }
+ 
+-  asyncError.message = `thrown: ${prettyFormat(error, {maxDepth: 3})}`;
++  if (asyncError) {
++    asyncError.message = `thrown: ${prettyFormat(error, {maxDepth: 3})}`;
++    return asyncError;
++  }
+ 
+-  return asyncError;
++  return new Error(
++    `thrown: ${prettyFormat(error, {maxDepth: 3})}`,
++  );
+ };
+ 
+ const getErrorStack = (error: Error): string =>
+
+From 5289f32c257c333721ddb2457b9e732c05f8388f Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Thu, 19 Mar 2026 21:50:42 +0530
+Subject: [PATCH 02/14] Update getError.test.ts
+
+---
+ .../jest-circus/src/__tests__/getError.test.ts    | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/packages/jest-circus/src/__tests__/getError.test.ts b/packages/jest-circus/src/__tests__/getError.test.ts
+index 207405b90e79..c19465993294 100644
+--- a/packages/jest-circus/src/__tests__/getError.test.ts
++++ b/packages/jest-circus/src/__tests__/getError.test.ts
+@@ -6,13 +6,16 @@
+  */
+ 
+ 
+-import {_getError} from '../utils';
++import {runTest} from '../__mocks__/testUtils';
+ 
+ test('handles plain object error with undefined asyncError', () => {
+-  const errors = [{status: 403, message: 'Forbidden'}, undefined] as any;
++  const code = `
++    test('throws plain object', () => {
++      throw {status: 403, message: 'Forbidden'};
++    });
++  `;
+ 
+-  const result = _getError(errors);
++  const {stderr} = runTest(code);
+ 
+-  expect(result).toBeInstanceOf(Error);
+-  expect(result.message).toContain('Forbidden');
+-});
+\ No newline at end of file
++  expect(stderr).toContain('Forbidden');
++});
+
+From 40ec6d5d01c473ebf19f25746b80c8949a41791b Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Thu, 19 Mar 2026 22:03:26 +0530
+Subject: [PATCH 03/14] Try to solve the issue
+
+---
+ packages/jest-circus/src/__tests__/getError.test.ts | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/packages/jest-circus/src/__tests__/getError.test.ts b/packages/jest-circus/src/__tests__/getError.test.ts
+index c19465993294..95ebca30d59c 100644
+--- a/packages/jest-circus/src/__tests__/getError.test.ts
++++ b/packages/jest-circus/src/__tests__/getError.test.ts
+@@ -8,14 +8,14 @@
+ 
+ import {runTest} from '../__mocks__/testUtils';
+ 
+-test('handles plain object error with undefined asyncError', () => {
++test('handles plain object throw without crashing', () => {
+   const code = `
+-    test('throws plain object', () => {
++    test('plain object error', () => {
+       throw {status: 403, message: 'Forbidden'};
+     });
+   `;
+ 
+-  const {stderr} = runTest(code);
++  const {stdout, stderr} = runTest(code);
+ 
+   expect(stderr).toContain('Forbidden');
+ });
+
+From 4afd3db41b5944feeff6c588957173980ea29c61 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:05:52 +0530
+Subject: [PATCH 04/14] Delete
+ packages/jest-circus/src/__tests__/getError.test.ts
+
+---
+ .../src/__tests__/getError.test.ts            | 21 -------------------
+ 1 file changed, 21 deletions(-)
+ delete mode 100644 packages/jest-circus/src/__tests__/getError.test.ts
+
+diff --git a/packages/jest-circus/src/__tests__/getError.test.ts b/packages/jest-circus/src/__tests__/getError.test.ts
+deleted file mode 100644
+index 95ebca30d59c..000000000000
+--- a/packages/jest-circus/src/__tests__/getError.test.ts
++++ /dev/null
+@@ -1,21 +0,0 @@
+-/**
+- * Copyright (c) Meta Platforms, Inc. and affiliates.
+- *
+- * This source code is licensed under the MIT license found in the
+- * LICENSE file in the root directory of this source tree.
+- */
+-
+-
+-import {runTest} from '../__mocks__/testUtils';
+-
+-test('handles plain object throw without crashing', () => {
+-  const code = `
+-    test('plain object error', () => {
+-      throw {status: 403, message: 'Forbidden'};
+-    });
+-  `;
+-
+-  const {stdout, stderr} = runTest(code);
+-
+-  expect(stderr).toContain('Forbidden');
+-});
+
+From 3934486a17b4a00284b9a63b5007a65fa708d513 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:08:22 +0530
+Subject: [PATCH 05/14] fix(types): allow undefined asyncError in
+ Circus.TestError
+
+---
+ packages/jest-types/src/Circus.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/jest-types/src/Circus.ts b/packages/jest-types/src/Circus.ts
+index f796e118e237..d648af542449 100644
+--- a/packages/jest-types/src/Circus.ts
++++ b/packages/jest-types/src/Circus.ts
+@@ -273,7 +273,7 @@ export type DescribeBlock = {
+   tests: Array<TestEntry>;
+ };
+ 
+-export type TestError = Exception | [Exception | undefined, Exception]; // the error from the test, as well as a backup error for async
++export type TestError = Exception | [Exception | undefined, Exception | undefined]; // the error from the test, as well as a backup error for async
+ 
+ export type TestEntry = {
+   type: 'test';
+
+From 6db08cb71b71ae30d7d5c31354eb63ceb2b92147 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:09:09 +0530
+Subject: [PATCH 06/14] Create asyncError.test.ts
+
+---
+ packages/jest-circus/src/__tests__/asyncError.test.ts | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 packages/jest-circus/src/__tests__/asyncError.test.ts
+
+diff --git a/packages/jest-circus/src/__tests__/asyncError.test.ts b/packages/jest-circus/src/__tests__/asyncError.test.ts
+new file mode 100644
+index 000000000000..8b137891791f
+--- /dev/null
++++ b/packages/jest-circus/src/__tests__/asyncError.test.ts
+@@ -0,0 +1 @@
++
+
+From d5581cfe334731abd65ccc59501f88867606371a Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:09:40 +0530
+Subject: [PATCH 07/14] Update asyncError.test.ts
+
+---
+ .../jest-circus/src/__tests__/asyncError.test.ts  | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/packages/jest-circus/src/__tests__/asyncError.test.ts b/packages/jest-circus/src/__tests__/asyncError.test.ts
+index 8b137891791f..54276e7721b7 100644
+--- a/packages/jest-circus/src/__tests__/asyncError.test.ts
++++ b/packages/jest-circus/src/__tests__/asyncError.test.ts
+@@ -1 +1,16 @@
++describe('async error handling', () => {
++  it('does not crash when asyncError is undefined and a plain object is thrown', done => {
++    const {test} = require('../');
+ 
++    test('inner test', innerDone => {
++      // simulate async error path (where asyncError can be undefined)
++      Promise.resolve().then(() => {
++        throw {status: 403, message: 'Forbidden'};
++      });
++
++      innerDone();
++    });
++
++    done();
++  });
++});
+
+From 76043aae767547f2cce9df5404f71a0aeed8c40b Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:17:06 +0530
+Subject: [PATCH 08/14] test: fix typing for innerDone
+
+---
+ packages/jest-circus/src/__tests__/asyncError.test.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/jest-circus/src/__tests__/asyncError.test.ts b/packages/jest-circus/src/__tests__/asyncError.test.ts
+index 54276e7721b7..0dea9c2d3d63 100644
+--- a/packages/jest-circus/src/__tests__/asyncError.test.ts
++++ b/packages/jest-circus/src/__tests__/asyncError.test.ts
+@@ -2,7 +2,7 @@ describe('async error handling', () => {
+   it('does not crash when asyncError is undefined and a plain object is thrown', done => {
+     const {test} = require('../');
+ 
+-    test('inner test', innerDone => {
++    test('inner test', (innerDone: any) => {
+       // simulate async error path (where asyncError can be undefined)
+       Promise.resolve().then(() => {
+         throw {status: 403, message: 'Forbidden'};
+
+From 13a3763b02a1d8011523f01143d5dfd5619be89f Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:35:30 +0530
+Subject: [PATCH 09/14] Update asyncError.test.ts
+
+---
+ packages/jest-circus/src/__tests__/asyncError.test.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/jest-circus/src/__tests__/asyncError.test.ts b/packages/jest-circus/src/__tests__/asyncError.test.ts
+index 0dea9c2d3d63..5d2e21f565d8 100644
+--- a/packages/jest-circus/src/__tests__/asyncError.test.ts
++++ b/packages/jest-circus/src/__tests__/asyncError.test.ts
+@@ -5,7 +5,7 @@ describe('async error handling', () => {
+     test('inner test', (innerDone: any) => {
+       // simulate async error path (where asyncError can be undefined)
+       Promise.resolve().then(() => {
+-        throw {status: 403, message: 'Forbidden'};
++        throw Object.assign(new Error('Forbidden'), {status: 403});
+       });
+ 
+       innerDone();
+
+From c4d6e61993d849811bf217a82578034042367ef8 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:36:31 +0530
+Subject: [PATCH 10/14] Update utils.ts
+
+---
+ packages/jest-circus/src/utils.ts | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/packages/jest-circus/src/utils.ts b/packages/jest-circus/src/utils.ts
+index 1f42a5fada6a..4e5273b3c0b3 100644
+--- a/packages/jest-circus/src/utils.ts
++++ b/packages/jest-circus/src/utils.ts
+@@ -438,9 +438,7 @@ const _getError = (
+     return asyncError;
+   }
+ 
+-  return new Error(
+-    `thrown: ${prettyFormat(error, {maxDepth: 3})}`,
+-  );
++  return new Error(`thrown: ${prettyFormat(error, {maxDepth: 3})}`);
+ };
+ 
+ const getErrorStack = (error: Error): string =>
+
+From 8eeba767c7cf9ddd149ee5b5e649c070d9c33558 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 01:37:17 +0530
+Subject: [PATCH 11/14] Update Circus.ts
+
+---
+ packages/jest-types/src/Circus.ts | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/packages/jest-types/src/Circus.ts b/packages/jest-types/src/Circus.ts
+index d648af542449..a912166705d6 100644
+--- a/packages/jest-types/src/Circus.ts
++++ b/packages/jest-types/src/Circus.ts
+@@ -273,7 +273,9 @@ export type DescribeBlock = {
+   tests: Array<TestEntry>;
+ };
+ 
+-export type TestError = Exception | [Exception | undefined, Exception | undefined]; // the error from the test, as well as a backup error for async
++export type TestError =
++  | Exception
++  | [Exception | undefined, Exception | undefined]; // the error from the test, as well as a backup error for async
+ 
+ export type TestEntry = {
+   type: 'test';
+
+From 569688084e686ae1aabd1d49ab6b12780e6a29d0 Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 11:11:29 +0530
+Subject: [PATCH 12/14] Add header
+
+---
+ packages/jest-circus/src/__tests__/asyncError.test.ts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/packages/jest-circus/src/__tests__/asyncError.test.ts b/packages/jest-circus/src/__tests__/asyncError.test.ts
+index 5d2e21f565d8..f3f2bca369f5 100644
+--- a/packages/jest-circus/src/__tests__/asyncError.test.ts
++++ b/packages/jest-circus/src/__tests__/asyncError.test.ts
+@@ -1,3 +1,11 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++
+ describe('async error handling', () => {
+   it('does not crash when asyncError is undefined and a plain object is thrown', done => {
+     const {test} = require('../');
+
+From e90916a992ae3af5d9b435b7093327841fc37feb Mon Sep 17 00:00:00 2001
+From: Ashok Narayan <vs.ashoknarayan@gmail.com>
+Date: Sat, 21 Mar 2026 15:50:07 +0530
+Subject: [PATCH 13/14] Make it prettier
+
+---
+ packages/jest-circus/src/__tests__/asyncError.test.ts | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/packages/jest-circus/src/__tests__/asyncError.test.ts b/packages/jest-circus/src/__tests__/asyncError.test.ts
+index f3f2bca369f5..de39ca42ed68 100644
+--- a/packages/jest-circus/src/__tests__/asyncError.test.ts
++++ b/packages/jest-circus/src/__tests__/asyncError.test.ts
+@@ -5,7 +5,6 @@
+  * LICENSE file in the root directory of this source tree.
+  */
+ 
+-
+ describe('async error handling', () => {
+   it('does not crash when asyncError is undefined and a plain object is thrown', done => {
+     const {test} = require('../');
+
+From baa518d99a9a4f7856d95ae0f7f3eae2750051c2 Mon Sep 17 00:00:00 2001
+From: Simen Bekkhus <sbekkhus91@gmail.com>
+Date: Fri, 1 May 2026 14:28:02 +0200
+Subject: [PATCH 14/14] changelog
+
+---
+ CHANGELOG.md | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 3dcfef54e951..98e12dc9c45c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -10,7 +10,8 @@
+ ### Fixes
+ 
+ - `[expect-utils]` Fix `toStrictEqual` failing on `structuredClone` results due to cross-realm constructor mismatch ([#14011](https://github.com/jestjs/jest/issues/14011))
+-- `[fake-timers)]` Convert `Date` to milliseconds before passing to `@sinonjs/fake-timers` ([#16029](https://github.com/jestjs/jest/pull/16029))
++- `[fake-timers]` Convert `Date` to milliseconds before passing to `@sinonjs/fake-timers` ([#16029](https://github.com/jestjs/jest/pull/16029))
++- `[jest-circus]` Prevent crash when `asyncError` is undefined for non-Error throws ([#16003](https://github.com/jestjs/jest/pull/16003))
+ - `[jest-runtime]` Improve CJS-from-ESM interop: `__esModule`/Babel default unwrap, broader named-export coverage, and shared CJS singleton across importers ([#16050](https://github.com/jestjs/jest/pull/16050))
+ - `[jest-runtime]` Load `.js` files with ESM syntax but no `"type":"module"` marker as native ESM ([#16050](https://github.com/jestjs/jest/pull/16050))
+ - `[jest-runtime]` Fix deadlocks and double-evaluation in concurrent ESM and wasm imports ([#16050](https://github.com/jestjs/jest/pull/16050))

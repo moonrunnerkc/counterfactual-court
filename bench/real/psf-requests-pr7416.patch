@@ -1,0 +1,116 @@
+From 31916a28987596c1a07c44654abdcb981fa137f5 Mon Sep 17 00:00:00 2001
+From: Joshua Kothapalle <joshua.kp0812@gmail.com>
+Date: Thu, 7 May 2026 17:25:17 -0400
+Subject: [PATCH 1/2] docs: update stale Sphinx link in contributing guide
+
+---
+ docs/dev/contributing.rst | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/dev/contributing.rst b/docs/dev/contributing.rst
+index 214e2b48ce..d63527ad71 100644
+--- a/docs/dev/contributing.rst
++++ b/docs/dev/contributing.rst
+@@ -133,7 +133,7 @@ When presenting Python code, use single-quoted strings (``'hello'`` instead of
+ ``"hello"``).
+ 
+ .. _reStructuredText: http://docutils.sourceforge.net/rst.html
+-.. _Sphinx: http://sphinx-doc.org/index.html
++.. _Sphinx: https://www.sphinx-doc.org/en/master/
+ 
+ 
+ .. _bug-reports:
+
+From 2a7e7fbb75082df952064f376c95a9d1116e8183 Mon Sep 17 00:00:00 2001
+From: Nate Prewitt <nate.prewitt@gmail.com>
+Date: Thu, 7 May 2026 15:47:07 -0600
+Subject: [PATCH 2/2] Cleanup remaining http:// reference URIs
+
+---
+ docs/Makefile                | 2 +-
+ docs/community/faq.rst       | 4 ++--
+ docs/community/out-there.rst | 2 +-
+ docs/dev/contributing.rst    | 4 ++--
+ docs/make.bat                | 2 +-
+ 5 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/docs/Makefile b/docs/Makefile
+index 08a2acf6dc..e51cdc0b53 100644
+--- a/docs/Makefile
++++ b/docs/Makefile
+@@ -9,7 +9,7 @@ BUILDDIR      = _build
+ 
+ # User-friendly check for sphinx-build
+ ifeq ($(shell which $(SPHINXBUILD) >/dev/null 2>&1; echo $$?), 1)
+-$(error The '$(SPHINXBUILD)' command was not found. Make sure you have Sphinx installed, then set the SPHINXBUILD environment variable to point to the full path of the '$(SPHINXBUILD)' executable. Alternatively you can add the directory with the executable to your PATH. If you don't have Sphinx installed, grab it from http://sphinx-doc.org/)
++$(error The '$(SPHINXBUILD)' command was not found. Make sure you have Sphinx installed, then set the SPHINXBUILD environment variable to point to the full path of the '$(SPHINXBUILD)' executable. Alternatively you can add the directory with the executable to your PATH. If you don't have Sphinx installed, grab it from https://www.sphinx-doc.org/)
+ endif
+ 
+ # Internal variables.
+diff --git a/docs/community/faq.rst b/docs/community/faq.rst
+index 2daba88704..e108377971 100644
+--- a/docs/community/faq.rst
++++ b/docs/community/faq.rst
+@@ -30,7 +30,7 @@ Why not Httplib2?
+ -----------------
+ 
+ Chris Adams gave an excellent summary on
+-`Hacker News <http://news.ycombinator.com/item?id=2884406>`_:
++`Hacker News <https://news.ycombinator.com/item?id=2884406>`_:
+ 
+     httplib2 is part of why you should use requests: it's far more respectable
+     as a client but not as well documented and it still takes way too much code
+@@ -44,7 +44,7 @@ Chris Adams gave an excellent summary on
+     Disclosure: I'm listed in the requests AUTHORS file but can claim credit
+     for, oh, about 0.0001% of the awesomeness.
+ 
+-    1. http://code.google.com/p/httplib2/issues/detail?id=96 is a good example:
++    1. https://code.google.com/p/httplib2/issues/detail?id=96 is a good example:
+     an annoying bug that affected many people, there was a fix available for
+     months, which worked great when I applied it in a fork and pounded a couple
+     TB of data through it, but it took over a year to make it into trunk and
+diff --git a/docs/community/out-there.rst b/docs/community/out-there.rst
+index c75c71f6a2..9cfe8897a1 100644
+--- a/docs/community/out-there.rst
++++ b/docs/community/out-there.rst
+@@ -7,4 +7,4 @@ Articles & Talks
+ - `Issac Kelly's 'Consuming Web APIs' talk <https://issackelly.github.io/Consuming-Web-APIs-with-Python-Talk/slides/slides.html>`_
+ - `Blog post about Requests via Yum <https://arunsag.wordpress.com/2011/08/17/new-package-python-requests-http-for-humans/>`_
+ - `Russian blog post introducing Requests <https://habr.com/post/126262/>`_
+-- `Sending JSON in Requests <http://www.coglib.com/~icordasc/blog/2014/11/sending-json-in-requests.html>`_
++- `Sending JSON in Requests <https://www.coglib.com/~icordasc/blog/2014/11/sending-json-in-requests.html>`_
+diff --git a/docs/dev/contributing.rst b/docs/dev/contributing.rst
+index d63527ad71..6059e0671e 100644
+--- a/docs/dev/contributing.rst
++++ b/docs/dev/contributing.rst
+@@ -14,7 +14,7 @@ getting a feel for how contributing to this project works. If you have any
+ questions, feel free to reach out to either `Nate Prewitt`_, `Ian Cordasco`_,
+ or `Seth Michael Larson`_, the primary maintainers.
+ 
+-.. _Ian Cordasco: http://www.coglib.com/~icordasc/
++.. _Ian Cordasco: https://www.coglib.com/~icordasc/
+ .. _Nate Prewitt: https://www.nateprewitt.com/
+ .. _Seth Michael Larson: https://sethmlarson.dev/
+ 
+@@ -132,7 +132,7 @@ files and a semi-formal, yet friendly and approachable, prose style.
+ When presenting Python code, use single-quoted strings (``'hello'`` instead of
+ ``"hello"``).
+ 
+-.. _reStructuredText: http://docutils.sourceforge.net/rst.html
++.. _reStructuredText: https://docutils.sourceforge.net/rst.html
+ .. _Sphinx: https://www.sphinx-doc.org/en/master/
+ 
+ 
+diff --git a/docs/make.bat b/docs/make.bat
+index 9eaf9b8893..480cd1fcd4 100644
+--- a/docs/make.bat
++++ b/docs/make.bat
+@@ -65,7 +65,7 @@ if errorlevel 9009 (
+ 	echo.may add the Sphinx directory to PATH.
+ 	echo.
+ 	echo.If you don't have Sphinx installed, grab it from
+-	echo.http://sphinx-doc.org/
++	echo.https://www.sphinx-doc.org/
+ 	exit /b 1
+ )
+ 

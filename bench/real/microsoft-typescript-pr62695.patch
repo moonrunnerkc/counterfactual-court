@@ -1,0 +1,523 @@
+From 6c03b3a77a315bb80613218d88e47c97ad731961 Mon Sep 17 00:00:00 2001
+From: CSIGS-Expires-nextweek <csigs@outlook.com>
+Date: Thu, 30 Oct 2025 19:36:09 +0000
+Subject: [PATCH] Juno: check in to
+ lego/hb_5378966c-b857-470a-8675-daebef4a6da1_20251030193607558.
+
+---
+ .../diagnosticMessages.generated.json.lcl     | 60 ++++++++++++-------
+ .../diagnosticMessages.generated.json.lcl     | 45 ++++++++------
+ .../diagnosticMessages.generated.json.lcl     | 60 ++++++++++++-------
+ .../diagnosticMessages.generated.json.lcl     | 60 ++++++++++++-------
+ .../diagnosticMessages.generated.json.lcl     | 60 ++++++++++++-------
+ 5 files changed, 183 insertions(+), 102 deletions(-)
+
+diff --git a/src/loc/lcl/deu/diagnosticMessages/diagnosticMessages.generated.json.lcl b/src/loc/lcl/deu/diagnosticMessages/diagnosticMessages.generated.json.lcl
+index 018172be2bf6e..8d92f2ae01f9b 100644
+--- a/src/loc/lcl/deu/diagnosticMessages/diagnosticMessages.generated.json.lcl
++++ b/src/loc/lcl/deu/diagnosticMessages/diagnosticMessages.generated.json.lcl
+@@ -267,11 +267,11 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";A_const_assertions_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array__1355" ItemType="0" PsrId="306" Leaf="true">
++      <Item ItemId=";A_const_assertion_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array_o_1355" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+-          <Val><![CDATA[A 'const' assertions can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
++          <Val><![CDATA[A 'const' assertion can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
+           <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[Eine const-Assertion kann nur auf Verweise auf Enumerationsmember oder Zeichenfolgen-, Zahlen-, boolesche, Array- oder Objektliterale angewendet werden.]]></Val>
++            <Val><![CDATA[Eine „const“-Assertion kann nur auf Referenzen auf Enumerationsmitglieder oder auf String-, Zahlen-, Boolean-, Array- oder Objektliterale angewendet werden.]]></Val>
+           </Tgt>
+         </Str>
+         <Disp Icon="Str" />
+@@ -3366,6 +3366,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Cannot_find_module_or_type_declarations_for_side_effect_import_of_0_2882" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Cannot find module or type declarations for side-effect import of '{0}'.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Es können keine Modul- oder Typdeklarationen für den Import von Nebeneffekten von „{0}“ gefunden werden.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Cannot_find_name_0_2304" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Cannot find name '{0}'.]]></Val>
+@@ -17457,6 +17466,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashts6_for_migration_information_5111" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Visit https://aka.ms/ts6 for migration information.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Weitere Informationen zur Migration finden Sie unter https://aka.ms/ts6.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashtsconfig_to_read_more_about_this_file_95110" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Visit https://aka.ms/tsconfig to read more about this file]]></Val>
+@@ -18828,6 +18846,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";false_unless_checkJs_is_set_6932" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`false`, unless `checkJs` is set]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[„false“, es sei denn „checkJs“ ist festgelegt]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";false_unless_composite_is_set_6906" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[`false`, unless `composite` is set]]></Val>
+@@ -18954,24 +18981,6 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";module_AMD_or_UMD_or_System_or_ES6_then_Classic_Otherwise_Node_69010" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === `AMD` or `UMD` or `System` or `ES6`, then `Classic`, Otherwise `Node`]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[Modul === 'AMD' oder 'UMD' oder 'System' oder 'ES6', dann 'Klassisch', andernfalls 'Knoten']]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+-      <Item ItemId=";module_system_or_esModuleInterop_6904" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === "system" or esModuleInterop]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[Modul === "System" oder esModuleInterop]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+       <Item ItemId=";new_expression_whose_target_lacks_a_construct_signature_implicitly_has_an_any_type_7009" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA['new' expression, whose target lacks a construct signature, implicitly has an 'any' type.]]></Val>
+@@ -18990,6 +18999,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";nodenext_if_module_is_nodenext_node16_if_module_is_node16_or_node18_otherwise_bundler_69010" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`nodenext` if `module` is `nodenext`; `node16` if `module` is `node16` or `node18`; otherwise, `bundler`.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[„nodenext“, wenn „module“ auf „nodenext“ festgelegt ist; „node16“, wenn „module“ auf „node16“ oder „node18“ festgelegt ist; andernfalls „bundler“.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";one_of_Colon_6900" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[one of:]]></Val>
+diff --git a/src/loc/lcl/esn/diagnosticMessages/diagnosticMessages.generated.json.lcl b/src/loc/lcl/esn/diagnosticMessages/diagnosticMessages.generated.json.lcl
+index 6b4192b27f127..316bc6e76a9b0 100644
+--- a/src/loc/lcl/esn/diagnosticMessages/diagnosticMessages.generated.json.lcl
++++ b/src/loc/lcl/esn/diagnosticMessages/diagnosticMessages.generated.json.lcl
+@@ -17484,6 +17484,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashts6_for_migration_information_5111" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Visit https://aka.ms/ts6 for migration information.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Visite https://aka.ms/ts6 para obtener información sobre la migración.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashtsconfig_to_read_more_about_this_file_95110" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Visit https://aka.ms/tsconfig to read more about this file]]></Val>
+@@ -18855,6 +18864,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";false_unless_checkJs_is_set_6932" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`false`, unless `checkJs` is set]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`false`, a menos que se establezca `checkJs`]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";false_unless_composite_is_set_6906" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[`false`, unless `composite` is set]]></Val>
+@@ -18981,24 +18999,6 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";module_AMD_or_UMD_or_System_or_ES6_then_Classic_Otherwise_Node_69010" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === `AMD` or `UMD` or `System` or `ES6`, then `Classic`, Otherwise `Node`]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[módulo === "AMD" o "UMD" o "System" o "ES6", después, "Classic", de lo contrario "Node"]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+-      <Item ItemId=";module_system_or_esModuleInterop_6904" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === "system" or esModuleInterop]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[módulo === "system" o esModuleInterop]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+       <Item ItemId=";new_expression_whose_target_lacks_a_construct_signature_implicitly_has_an_any_type_7009" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA['new' expression, whose target lacks a construct signature, implicitly has an 'any' type.]]></Val>
+@@ -19017,6 +19017,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";nodenext_if_module_is_nodenext_node16_if_module_is_node16_or_node18_otherwise_bundler_69010" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`nodenext` if `module` is `nodenext`; `node16` if `module` is `node16` or `node18`; otherwise, `bundler`.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`nodenext` si `module` es `nodenext`; `node16` si `module` es `node16` o `node18`; de lo contrario, `bundler`.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";one_of_Colon_6900" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[one of:]]></Val>
+diff --git a/src/loc/lcl/fra/diagnosticMessages/diagnosticMessages.generated.json.lcl b/src/loc/lcl/fra/diagnosticMessages/diagnosticMessages.generated.json.lcl
+index 8ec8335270b93..6cbea6e048b20 100644
+--- a/src/loc/lcl/fra/diagnosticMessages/diagnosticMessages.generated.json.lcl
++++ b/src/loc/lcl/fra/diagnosticMessages/diagnosticMessages.generated.json.lcl
+@@ -276,11 +276,11 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";A_const_assertions_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array__1355" ItemType="0" PsrId="306" Leaf="true">
++      <Item ItemId=";A_const_assertion_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array_o_1355" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+-          <Val><![CDATA[A 'const' assertions can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
++          <Val><![CDATA[A 'const' assertion can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
+           <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[Une assertion 'const' peut uniquement être appliquée aux références à des membres enum, des littéraux de chaînes, des littéraux de nombres, des littéraux de valeurs booléennes, des littéraux de tableaux ou des littéraux d'objets.]]></Val>
++            <Val><![CDATA[Une assertion « const » peut uniquement être appliquée aux références à des membres enum, des littéraux de chaînes, des littéraux de nombres, des littéraux de valeurs booléennes, des littéraux de tableaux ou des littéraux d'objets.]]></Val>
+           </Tgt>
+         </Str>
+         <Disp Icon="Str" />
+@@ -3381,6 +3381,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Cannot_find_module_or_type_declarations_for_side_effect_import_of_0_2882" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Cannot find module or type declarations for side-effect import of '{0}'.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Impossible de trouver les déclarations de module ou de type pour l’importation à effet secondaire de « {0} ».]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Cannot_find_name_0_2304" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Cannot find name '{0}'.]]></Val>
+@@ -17475,6 +17484,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashts6_for_migration_information_5111" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Visit https://aka.ms/ts6 for migration information.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Visitez https://aka.ms/ts6 pour obtenir des informations sur la migration.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashtsconfig_to_read_more_about_this_file_95110" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Visit https://aka.ms/tsconfig to read more about this file]]></Val>
+@@ -18846,6 +18864,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";false_unless_checkJs_is_set_6932" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`false`, unless `checkJs` is set]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[« false », sauf si « checkJs » est défini]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";false_unless_composite_is_set_6906" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[`false`, unless `composite` is set]]></Val>
+@@ -18972,24 +18999,6 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";module_AMD_or_UMD_or_System_or_ES6_then_Classic_Otherwise_Node_69010" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === `AMD` or `UMD` or `System` or `ES6`, then `Classic`, Otherwise `Node`]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[module === « AMD » ou « UMD » ou « System » ou « ES6 », puis « Classic », sinon « Node »]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+-      <Item ItemId=";module_system_or_esModuleInterop_6904" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === "system" or esModuleInterop]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[module === « system » ou esModuleInterop]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+       <Item ItemId=";new_expression_whose_target_lacks_a_construct_signature_implicitly_has_an_any_type_7009" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA['new' expression, whose target lacks a construct signature, implicitly has an 'any' type.]]></Val>
+@@ -19008,6 +19017,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";nodenext_if_module_is_nodenext_node16_if_module_is_node16_or_node18_otherwise_bundler_69010" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`nodenext` if `module` is `nodenext`; `node16` if `module` is `node16` or `node18`; otherwise, `bundler`.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`nodenext` si `module` est `nodenext` ; `node16` si `module` est `node16` ou `node18` ; sinon, `bundler`.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";one_of_Colon_6900" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[one of:]]></Val>
+diff --git a/src/loc/lcl/jpn/diagnosticMessages/diagnosticMessages.generated.json.lcl b/src/loc/lcl/jpn/diagnosticMessages/diagnosticMessages.generated.json.lcl
+index 9e85d0fd9d85b..8d2985e9e5bf0 100644
+--- a/src/loc/lcl/jpn/diagnosticMessages/diagnosticMessages.generated.json.lcl
++++ b/src/loc/lcl/jpn/diagnosticMessages/diagnosticMessages.generated.json.lcl
+@@ -267,11 +267,11 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";A_const_assertions_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array__1355" ItemType="0" PsrId="306" Leaf="true">
++      <Item ItemId=";A_const_assertion_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array_o_1355" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+-          <Val><![CDATA[A 'const' assertions can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
++          <Val><![CDATA[A 'const' assertion can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
+           <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA['const' アサーションは、列挙型メンバーへの参照、文字列、数値、ブール値、配列、オブジェクト リテラルにのみ適用できます。]]></Val>
++            <Val><![CDATA['const' アサーションは、列挙型メンバーへの参照、または文字列、数値、ブール値、配列、オブジェクト リテラルへの参照にのみ適用できます。]]></Val>
+           </Tgt>
+         </Str>
+         <Disp Icon="Str" />
+@@ -3369,6 +3369,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Cannot_find_module_or_type_declarations_for_side_effect_import_of_0_2882" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Cannot find module or type declarations for side-effect import of '{0}'.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA['{0}' の副作用インポートに対するモジュールまたは型宣言が見つかりません。]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Cannot_find_name_0_2304" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Cannot find name '{0}'.]]></Val>
+@@ -17463,6 +17472,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashts6_for_migration_information_5111" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Visit https://aka.ms/ts6 for migration information.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[移行情報については、http://aka.ms/ts6 にアクセスしてください。]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashtsconfig_to_read_more_about_this_file_95110" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Visit https://aka.ms/tsconfig to read more about this file]]></Val>
+@@ -18834,6 +18852,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";false_unless_checkJs_is_set_6932" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`false`, unless `checkJs` is set]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`false`、`checkJs` が設定されている場合を除く]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";false_unless_composite_is_set_6906" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[`false`, unless `composite` is set]]></Val>
+@@ -18960,24 +18987,6 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";module_AMD_or_UMD_or_System_or_ES6_then_Classic_Otherwise_Node_69010" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === `AMD` or `UMD` or `System` or `ES6`, then `Classic`, Otherwise `Node`]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[モジュール === 'AMD'、'UMD'、'System'、'ES6'、'Classic'、それ以外の場合は 'Node']]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+-      <Item ItemId=";module_system_or_esModuleInterop_6904" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === "system" or esModuleInterop]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[module === "system" or esModuleInterop]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+       <Item ItemId=";new_expression_whose_target_lacks_a_construct_signature_implicitly_has_an_any_type_7009" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA['new' expression, whose target lacks a construct signature, implicitly has an 'any' type.]]></Val>
+@@ -18996,6 +19005,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";nodenext_if_module_is_nodenext_node16_if_module_is_node16_or_node18_otherwise_bundler_69010" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`nodenext` if `module` is `nodenext`; `node16` if `module` is `node16` or `node18`; otherwise, `bundler`.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`module` が `nodenext` の場合は `nodenext`、`module` が `node16` または `node18` の場合は `node16`、それ以外の場合は `bundler`。]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";one_of_Colon_6900" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[one of:]]></Val>
+diff --git a/src/loc/lcl/plk/diagnosticMessages/diagnosticMessages.generated.json.lcl b/src/loc/lcl/plk/diagnosticMessages/diagnosticMessages.generated.json.lcl
+index a08c7223248dd..6b01c320dcbbc 100644
+--- a/src/loc/lcl/plk/diagnosticMessages/diagnosticMessages.generated.json.lcl
++++ b/src/loc/lcl/plk/diagnosticMessages/diagnosticMessages.generated.json.lcl
+@@ -260,11 +260,11 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";A_const_assertions_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array__1355" ItemType="0" PsrId="306" Leaf="true">
++      <Item ItemId=";A_const_assertion_can_only_be_applied_to_references_to_enum_members_or_string_number_boolean_array_o_1355" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+-          <Val><![CDATA[A 'const' assertions can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
++          <Val><![CDATA[A 'const' assertion can only be applied to references to enum members, or string, number, boolean, array, or object literals.]]></Val>
+           <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[Asercje „const” mogą być stosowane tylko do odwołań do elementów członkowskich wyliczenia lub literałów typu string, number, boolean, array lub object.]]></Val>
++            <Val><![CDATA[Asercja „const” może być stosowana tylko do odwołań do elementów członkowskich wyliczenia lub ciągu, liczby, wartości logicznej, tablicy lub literałów obiektów.]]></Val>
+           </Tgt>
+         </Str>
+         <Disp Icon="Str" />
+@@ -3359,6 +3359,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Cannot_find_module_or_type_declarations_for_side_effect_import_of_0_2882" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Cannot find module or type declarations for side-effect import of '{0}'.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Nie można odnaleźć deklaracji modułu lub typu dla importu efektu ubocznego elementu „{0}”.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Cannot_find_name_0_2304" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Cannot find name '{0}'.]]></Val>
+@@ -17450,6 +17459,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashts6_for_migration_information_5111" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[Visit https://aka.ms/ts6 for migration information.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[Odwiedź https://aka.ms/ts6, aby uzyskać informacje o migracji.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";Visit_https_Colon_Slash_Slashaka_ms_Slashtsconfig_to_read_more_about_this_file_95110" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[Visit https://aka.ms/tsconfig to read more about this file]]></Val>
+@@ -18821,6 +18839,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";false_unless_checkJs_is_set_6932" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`false`, unless `checkJs` is set]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`false`, chyba że ustawiono `checkJs`]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";false_unless_composite_is_set_6906" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[`false`, unless `composite` is set]]></Val>
+@@ -18947,24 +18974,6 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
+-      <Item ItemId=";module_AMD_or_UMD_or_System_or_ES6_then_Classic_Otherwise_Node_69010" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === `AMD` or `UMD` or `System` or `ES6`, then `Classic`, Otherwise `Node`]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[module === "AMD" lub "UMD" lub "System" lub "ES6", a następnie "Classic", w przeciwnym razie "Node"]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+-      <Item ItemId=";module_system_or_esModuleInterop_6904" ItemType="0" PsrId="306" Leaf="true">
+-        <Str Cat="Text">
+-          <Val><![CDATA[module === "system" or esModuleInterop]]></Val>
+-          <Tgt Cat="Text" Stat="Loc" Orig="New">
+-            <Val><![CDATA[module === "system" lub esModuleInterop]]></Val>
+-          </Tgt>
+-        </Str>
+-        <Disp Icon="Str" />
+-      </Item>
+       <Item ItemId=";new_expression_whose_target_lacks_a_construct_signature_implicitly_has_an_any_type_7009" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA['new' expression, whose target lacks a construct signature, implicitly has an 'any' type.]]></Val>
+@@ -18983,6 +18992,15 @@
+         </Str>
+         <Disp Icon="Str" />
+       </Item>
++      <Item ItemId=";nodenext_if_module_is_nodenext_node16_if_module_is_node16_or_node18_otherwise_bundler_69010" ItemType="0" PsrId="306" Leaf="true">
++        <Str Cat="Text">
++          <Val><![CDATA[`nodenext` if `module` is `nodenext`; `node16` if `module` is `node16` or `node18`; otherwise, `bundler`.]]></Val>
++          <Tgt Cat="Text" Stat="Loc" Orig="New">
++            <Val><![CDATA[`nodenext`, jeśli `module` ma wartość `nodenext`; `node16`, jeśli `module` ma wartość `node16` lub `node18`; w przeciwnym razie `bundler`.]]></Val>
++          </Tgt>
++        </Str>
++        <Disp Icon="Str" />
++      </Item>
+       <Item ItemId=";one_of_Colon_6900" ItemType="0" PsrId="306" Leaf="true">
+         <Str Cat="Text">
+           <Val><![CDATA[one of:]]></Val>

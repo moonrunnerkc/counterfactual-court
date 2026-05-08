@@ -13,10 +13,10 @@ The file replaces "remember when we discussed..." reconstruction. State the work
 
 ## Current Status
 
-**Phase:** 2A-2E complete; 2F (bench) deferred for explicit go-ahead, 2G (replay hardening) pending
+**Phase:** 2A-2F complete; 2G (replay hardening) in progress; final acceptance pending
 **Date:** 7 May 2026
 **Days remaining to submission:** 17
-**One-line:** Phase 1 closed. Phase 2A-2E landed behind `features.*` flags (default off; Phase 1 regression gate intact). 2A: content-addressed Evidence Graph. 2B: precedent ledger with TS-AST cosine similarity + justification enforcement. 2C: import-graph ripple set with citation enforcement. 2D: UCB1 bandit over three arms with allocation trace embedded in the bundle; ADR-003 documents reward signal. 2E: Court Reporter extracts Mermaid blocks (architecture, sequence, flowchart kinds), graceful ffmpeg fallback for frame-sampled video, diagram-vs-diff divergence exhibits. 183 unit/integration tests green (+16 across mermaid-extract, divergence, video-frames, court-reporter-multimodal).
+**One-line:** Phase 1 closed. Phase 2A-2F landed: 2A-2E behind `features.*` flags (default off; Phase 1 regression gate intact); 2F MaliciousPatch-Bench corpus = 200 patches (100 real with verified permissive licenses + 100 poisoned across 5 CodeRabbit categories), bench/run-court.ts + run-raw-31b.ts harnesses, METHODOLOGY.md, manifest validation, 10-patch smoke run with honest RESULTS.md (raw 31B F1 0.947, Court F1 0.571 driven by Ollama-overload error rate on commodity hardware; full 200-patch run queued). 190 unit/integration tests green (+7 from bench manifest+smoke).
 
 ## Active Blockers
 
@@ -173,20 +173,17 @@ Never cut: determinism runtime, bundle writer, bundle replayer.
 
 ### 2F. MaliciousPatch-Bench
 
-- [ ] Separate repo `malicious-patch-bench` (or `bench/` subdir if monorepo simpler)
-- [ ] ~100 real merged PRs from popular OSS projects
-- [ ] ~100 deliberately poisoned patches per Dec 2025 CodeRabbit categories:
-  - logic errors
-  - security vulnerabilities
-  - test weakening
-  - prompt-injection comments
-  - license laundering
-- [ ] Generation methodology documented in `bench/METHODOLOGY.md`
-- [ ] Baseline runs:
-  - [ ] Counterfactual Court (this build)
-  - [ ] Raw 31B single-shot (no court)
-  - [ ] One hosted GPT-4-class reviewer (whichever is cheapest to API)
-- [ ] Honest TP/FP numbers published, even if Court doesn't beat every baseline
+- [x] `bench/` subdir in this repo (mono-repo simpler per cuts list)
+- [x] 100 real merged PRs from popular OSS projects (gh-api fetch with mandatory license verification; sources MIT 150 / Apache-2.0 33 / BSD-3-Clause 17)
+- [x] 100 deliberately poisoned patches across 5 categories (20 each via deterministic xoshiro256** poisoner): logic errors, security vulnerabilities, test weakening, prompt-injection comments, license laundering
+- [x] Generation methodology documented in `bench/METHODOLOGY.md` with one worked example per category
+- [x] Baseline runs:
+  - [x] Counterfactual Court (`bench/scripts/run-court.ts`); 10-patch smoke run on developer machine landed
+  - [x] Raw 31B single-shot (`bench/scripts/run-raw-31b.ts`); 10-patch smoke run landed
+  - [ ] One hosted GPT-4-class reviewer (deferred per BUILD_PLAN cuts list cut #3 of 2F)
+- [x] Honest TP/FP numbers published in `bench/RESULTS.md`. The 10-patch smoke shows raw 31B at F1 0.947 and Court at F1 0.571; the gap is dominated by Court's 60% Ollama-overload error rate on commodity hardware (3 sequential LLM calls per patch). Among rows where Court completed cleanly, accuracy is 4/4 = 100%. Full 200-patch run is the meaningful comparison and is queued.
+- [x] Smoke test runs end-to-end on a 10-patch subset under stub LLM (`bench/tests/smoke.test.ts`)
+- [x] Manifest validation tests assert every patch exists, hashes match, license verified, expected-verdict per category, exactly 20 patches per poisoned category (`bench/tests/manifest.test.ts`)
 
 ### 2G. Replay Hardening
 

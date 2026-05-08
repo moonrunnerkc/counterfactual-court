@@ -1,0 +1,308 @@
+From c08ef1dad5700375ac69a6e4986b02b485d4263f Mon Sep 17 00:00:00 2001
+From: Hendrik Liebau <mail@hendrik-liebau.de>
+Date: Wed, 6 May 2026 20:12:51 +0200
+Subject: [PATCH 1/3] Track `searchParams` access through a Proxy to catch
+ missing-key reads
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When a page reads `searchParams` from a URL without a query string,
+`createVaryingSearchParams` previously returned a plain object whose
+only own properties were getters for keys that already existed in the
+URL. With no keys present, that's an empty `{}` — so `Object.entries`,
+spread, `in` checks, and missing-key reads (e.g. `searchParams.foo`
+returning `undefined`) all silently no-opped without registering an
+access. The segment ended up keyed at the `Fallback` search slot in the
+segment cache, where it shadowed subsequent prefetches with non-empty
+search params via `Fallback` resolution, silently serving the stale
+empty-query cache entry on navigation.
+
+This switches the implementation to a `Proxy` with `get`, `has`, and
+`ownKeys` traps that record the `'?'` sentinel on every string access.
+Search params have no fixed schema, so any access — including
+missing-key reads, `in` checks, and enumeration — must register as
+varying. The added regression test prefetches the no-query URL first and
+asserts that a subsequent `?foo=1` prefetch still triggers a fresh
+request. Without the fix the lookup resolves to the empty-query cache
+entry through `Fallback`, no request is initiated, and the test times
+out waiting for one.
+---
+ .../next/src/server/app-render/vary-params.ts | 36 ++++++++-----
+ .../app/(main)/search-params/page.tsx         |  5 ++
+ .../vary-params/vary-params.test.ts           | 50 +++++++++++++++++++
+ 3 files changed, 78 insertions(+), 13 deletions(-)
+
+diff --git a/packages/next/src/server/app-render/vary-params.ts b/packages/next/src/server/app-render/vary-params.ts
+index 5c6156177d5b..10fb58c3cf55 100644
+--- a/packages/next/src/server/app-render/vary-params.ts
++++ b/packages/next/src/server/app-render/vary-params.ts
+@@ -301,20 +301,30 @@ export function createVaryingSearchParams(
+   accumulator: VaryParamsAccumulator,
+   originalSearchParamsObject: SearchParams
+ ): SearchParams {
+-  const underlyingSearchParamsWithVarying: SearchParams = {}
+-  for (const searchParamName in originalSearchParamsObject) {
+-    Object.defineProperty(underlyingSearchParamsWithVarying, searchParamName, {
+-      get() {
+-        // TODO: Unlike path params, we don't vary track each search param
+-        // individually. The entire search string is treated as a single param.
+-        // This may change in the future.
++  // Search params have no fixed schema, so any access — missing-key reads, `in`
++  // checks, or enumeration — must register as varying. A Proxy is required
++  // (rather than per-property getters) so that enumeration of an empty
++  // searchParams object still triggers a vary. All accesses bucket into the
++  // single sentinel '?'; the segment is keyed by the whole query string.
++  // TODO: Split into per-param tracking if the cache key evolves.
++  return new Proxy(originalSearchParamsObject, {
++    get(target, prop, receiver) {
++      if (typeof prop === 'string') {
+         accumulateVaryParam(accumulator, '?')
+-        return originalSearchParamsObject[searchParamName]
+-      },
+-      enumerable: true,
+-    })
+-  }
+-  return underlyingSearchParamsWithVarying
++      }
++      return Reflect.get(target, prop, receiver)
++    },
++    has(target, prop) {
++      if (typeof prop === 'string') {
++        accumulateVaryParam(accumulator, '?')
++      }
++      return Reflect.has(target, prop)
++    },
++    ownKeys(target) {
++      accumulateVaryParam(accumulator, '?')
++      return Reflect.ownKeys(target)
++    },
++  })
+ }
+ 
+ /**
+diff --git a/test/e2e/app-dir/segment-cache/vary-params/app/(main)/search-params/page.tsx b/test/e2e/app-dir/segment-cache/vary-params/app/(main)/search-params/page.tsx
+index 54d7507c6f30..7bbc63921acd 100644
+--- a/test/e2e/app-dir/segment-cache/vary-params/app/(main)/search-params/page.tsx
++++ b/test/e2e/app-dir/segment-cache/vary-params/app/(main)/search-params/page.tsx
+@@ -27,6 +27,11 @@ export default function SearchParamsIndexPage() {
+ 
+       <h2>Target (accesses searchParams)</h2>
+       <ul>
++        <li>
++          <LinkAccordion href="/search-params/target-page">
++            Target with no search params
++          </LinkAccordion>
++        </li>
+         <li>
+           <LinkAccordion href="/search-params/target-page?foo=1">
+             Target with foo=1
+diff --git a/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts b/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts
+index 1337a8aeb6a4..5ad4138038a5 100644
+--- a/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts
++++ b/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts
+@@ -250,6 +250,56 @@ describe('segment cache - vary params', () => {
+     )
+   })
+ 
++  it('does not reuse prefetched empty-query segment for prefetches with searchParams', async () => {
++    // When a page reads searchParams that don't exist on the request URL (e.g.
++    // destructuring `foo` from `/search-params/target-page` with no query),
++    // that's still an access that affects the response and must register the
++    // segment as varying by '?'. Otherwise the empty-query prefetch ends up
++    // keyed at the Fallback search-slot, which shadows subsequent ?foo=N
++    // prefetches via Fallback resolution and causes them to silently serve the
++    // wrong (empty-query) response.
++    let act: ReturnType<typeof createRouterAct>
++    const browser = await next.browser('/search-params', {
++      beforePageLoad(p: Playwright.Page) {
++        act = createRouterAct(p)
++      },
++    })
++
++    // Prefetch the no-query URL first. The page reads `foo` (a missing key),
++    // which must register as a vary access.
++    await act(
++      async () => {
++        const toggle = await browser.elementByCss(
++          'input[data-link-accordion="/search-params/target-page"]'
++        )
++        await toggle.click()
++      },
++      { includes: 'Search params target - foo: undefined' }
++    )
++
++    // Prefetching with a search param value must still trigger a new request,
++    // not silently reuse the empty-query entry through Fallback resolution.
++    await act(
++      async () => {
++        const toggle = await browser.elementByCss(
++          'input[data-link-accordion="/search-params/target-page?foo=1"]'
++        )
++        await toggle.click()
++      },
++      { includes: 'Search params target - foo: 1' }
++    )
++
++    // Navigate and verify the correct content renders for ?foo=1.
++    const link = await browser.elementByCss(
++      'a[href="/search-params/target-page?foo=1"]'
++    )
++    await link.click()
++    const content = await browser.elementByCss(
++      '[data-search-params-content="true"]'
++    )
++    expect(await content.text()).toContain('Search params target - foo: 1')
++  })
++
+   it('reuses prefetched segment when page does not access searchParams', async () => {
+     // When a page does NOT await searchParams, the cache key does NOT include
+     // search params, so different values share cached prefetch data.
+
+From e7add835a0f872aa9db40395c6be322950088b2f Mon Sep 17 00:00:00 2001
+From: Hendrik Liebau <mail@hendrik-liebau.de>
+Date: Wed, 6 May 2026 21:16:53 +0200
+Subject: [PATCH 2/3] Don't track framework `.then` probes on `searchParams`
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The `Proxy` for `searchParams` access tracking recorded `'?'` on every
+string access, including the `.then` reads performed by
+`Promise.resolve` (when constructing the wrapping promise) and React
+Flight serialization (when checking if a resolved value is itself a
+thenable). On a page that doesn't read `searchParams`, those framework
+probes alone made the segment appear to vary on the entire query string,
+breaking cache reuse across different param values.
+
+The Proxy's `get` trap now skips tracking when `prop === 'then'` and the
+key isn't present on the target. Trade-off: a page that reads
+`searchParams.then` to compute its output and is prefetched without a
+`then` key won't register the access — a later navigation to `?then=...`
+may then serve the wrong cached content via `Fallback` resolution.
+Accepted because `then` is reserved by the Promise protocol and
+essentially never used as a real query parameter name.
+---
+ .../next/src/server/app-render/vary-params.ts | 20 +++++++++++++++++++
+ .../next/src/server/request/search-params.ts  |  1 -
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/packages/next/src/server/app-render/vary-params.ts b/packages/next/src/server/app-render/vary-params.ts
+index 10fb58c3cf55..1012be6abbc5 100644
+--- a/packages/next/src/server/app-render/vary-params.ts
++++ b/packages/next/src/server/app-render/vary-params.ts
+@@ -310,6 +310,26 @@ export function createVaryingSearchParams(
+   return new Proxy(originalSearchParamsObject, {
+     get(target, prop, receiver) {
+       if (typeof prop === 'string') {
++        // `.then` reads are ambiguous: `Promise.resolve` (when constructing the
++        // wrapping promise) and React Flight serialization (when checking if a
++        // resolved value is itself a thenable) both probe `.then` as part of
++        // the thenable protocol, and we don't want those probes to register as
++        // user dependencies. But user code can also read a `then` query
++        // parameter as a normal key. We can't tell the two apart, so we use key
++        // presence as a proxy: if the URL has `?then=...`, treat the access as
++        // user code; otherwise skip tracking. Trade-off: a page that reads
++        // `searchParams.then` to compute its output and is prefetched without a
++        // `then` key won't register the access — a later navigation to the same
++        // path with `?then=...` can then fall back to the no-`then` cache entry
++        // through `Fallback` resolution and serve content rendered for the
++        // wrong URL. Accepted because `then` is reserved by the Promise
++        // protocol and essentially never used as a real query parameter name.
++        if (
++          prop === 'then' &&
++          !Object.prototype.hasOwnProperty.call(target, prop)
++        ) {
++          return Reflect.get(target, prop, receiver)
++        }
+         accumulateVaryParam(accumulator, '?')
+       }
+       return Reflect.get(target, prop, receiver)
+diff --git a/packages/next/src/server/request/search-params.ts b/packages/next/src/server/request/search-params.ts
+index 4b5855925297..5d4c56501366 100644
+--- a/packages/next/src/server/request/search-params.ts
++++ b/packages/next/src/server/request/search-params.ts
+@@ -249,7 +249,6 @@ function createRuntimePrerenderSearchParams(
+     varyParamsAccumulator !== null
+       ? createVaryingSearchParams(varyParamsAccumulator, underlyingSearchParams)
+       : underlyingSearchParams
+-
+   const result = makeUntrackedSearchParams(underlyingSearchParamsWithVarying)
+   const { stagedRendering } = workUnitStore
+   if (!stagedRendering) {
+
+From 01cccddafcd3457238a8b33977c3800d3bafe55e Mon Sep 17 00:00:00 2001
+From: Hendrik Liebau <mail@hendrik-liebau.de>
+Date: Thu, 7 May 2026 13:23:18 +0200
+Subject: [PATCH 3/3] Don't filter `then` probes
+
+---
+ .../next/src/server/app-render/vary-params.ts | 20 -------------------
+ .../next/src/server/request/search-params.ts  |  1 +
+ .../vary-params/vary-params.test.ts           | 10 +++++++++-
+ 3 files changed, 10 insertions(+), 21 deletions(-)
+
+diff --git a/packages/next/src/server/app-render/vary-params.ts b/packages/next/src/server/app-render/vary-params.ts
+index 1012be6abbc5..10fb58c3cf55 100644
+--- a/packages/next/src/server/app-render/vary-params.ts
++++ b/packages/next/src/server/app-render/vary-params.ts
+@@ -310,26 +310,6 @@ export function createVaryingSearchParams(
+   return new Proxy(originalSearchParamsObject, {
+     get(target, prop, receiver) {
+       if (typeof prop === 'string') {
+-        // `.then` reads are ambiguous: `Promise.resolve` (when constructing the
+-        // wrapping promise) and React Flight serialization (when checking if a
+-        // resolved value is itself a thenable) both probe `.then` as part of
+-        // the thenable protocol, and we don't want those probes to register as
+-        // user dependencies. But user code can also read a `then` query
+-        // parameter as a normal key. We can't tell the two apart, so we use key
+-        // presence as a proxy: if the URL has `?then=...`, treat the access as
+-        // user code; otherwise skip tracking. Trade-off: a page that reads
+-        // `searchParams.then` to compute its output and is prefetched without a
+-        // `then` key won't register the access — a later navigation to the same
+-        // path with `?then=...` can then fall back to the no-`then` cache entry
+-        // through `Fallback` resolution and serve content rendered for the
+-        // wrong URL. Accepted because `then` is reserved by the Promise
+-        // protocol and essentially never used as a real query parameter name.
+-        if (
+-          prop === 'then' &&
+-          !Object.prototype.hasOwnProperty.call(target, prop)
+-        ) {
+-          return Reflect.get(target, prop, receiver)
+-        }
+         accumulateVaryParam(accumulator, '?')
+       }
+       return Reflect.get(target, prop, receiver)
+diff --git a/packages/next/src/server/request/search-params.ts b/packages/next/src/server/request/search-params.ts
+index 5d4c56501366..4b5855925297 100644
+--- a/packages/next/src/server/request/search-params.ts
++++ b/packages/next/src/server/request/search-params.ts
+@@ -249,6 +249,7 @@ function createRuntimePrerenderSearchParams(
+     varyParamsAccumulator !== null
+       ? createVaryingSearchParams(varyParamsAccumulator, underlyingSearchParams)
+       : underlyingSearchParams
++
+   const result = makeUntrackedSearchParams(underlyingSearchParamsWithVarying)
+   const { stagedRendering } = workUnitStore
+   if (!stagedRendering) {
+diff --git a/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts b/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts
+index 5ad4138038a5..d0928d01f2f1 100644
+--- a/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts
++++ b/test/e2e/app-dir/segment-cache/vary-params/vary-params.test.ts
+@@ -650,7 +650,15 @@ describe('segment cache - vary params', () => {
+     )
+   })
+ 
+-  it('shares cached segment across search params when not accessed (runtime prefetch)', async () => {
++  // TODO: When a Promise resolves with the searchParams Proxy as its value, the
++  // Promise spec's `[[Resolve]]` algorithm reads `.then` on the Proxy to check
++  // for thenable assimilation. The Proxy can't distinguish that probe from a
++  // real `searchParams.then` access, so any runtime-prefetched page that
++  // doesn't read `searchParams` ends up varying on the entire query string and
++  // can't share a cached segment. Re-enable once vary-param tracking moves to
++  // per-param keys. The spec-driven `.then` probe will then resolve to the same
++  // (undefined) value across these URLs and the cache entry will be reused.
++  it.skip('shares cached segment across search params when not accessed (runtime prefetch)', async () => {
+     // Runtime prefetch page that does NOT access searchParams. Since '?'
+     // is not in varyParams, different search param values share the cache.
+     let act: ReturnType<typeof createRouterAct>
