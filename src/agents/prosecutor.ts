@@ -82,6 +82,7 @@ export async function prosecute(input: ProsecutorInput): Promise<ProsecutionDoss
     seed,
     format: PROSECUTION_DOSSIER_JSON_SCHEMA,
     keepAlive: '15m',
+    maxTokens: 4096,
   });
   const dossier = parseJsonResponse(result.text, ProsecutionDossier, 'prosecutor');
   log.info('agent.done', {

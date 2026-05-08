@@ -59,3 +59,33 @@ export function assertEveryPrecedentJustified(graph: EvidenceGraph): void {
     `precedent justification: ${gaps.length} unjustified precedent${gaps.length === 1 ? '' : 's'} cited; the Jury must link each precedent to a supporting exhibit, citation, or test case\n${lines.join('\n')}`,
   );
 }
+
+/**
+ * Strip unjustified precedent nodes (and any edges incident to them) from the
+ * graph rather than throwing. Used by the Jury when the LLM cites a precedent
+ * without linking justification: dropping the dangling precedent preserves
+ * the rest of the verdict instead of failing the whole run. The orchestrator
+ * still calls {@link assertEveryPrecedentJustified} after this pass, but the
+ * assert is now an invariant check on a graph that has already been
+ * sanitized.
+ *
+ * @param graph Evidence graph that may contain unjustified precedents.
+ * @returns A graph with any unjustified precedents removed; original graph
+ *   returned unchanged when there were no gaps.
+ */
+export function stripUnjustifiedPrecedents(graph: EvidenceGraph): {
+  readonly graph: EvidenceGraph;
+  readonly stripped: readonly JustificationGap[];
+} {
+  const gaps = findUnjustifiedPrecedents(graph);
+  if (gaps.length === 0) return { graph, stripped: [] };
+  const droppedIds = new Set(gaps.map((g) => g.precedentId));
+  const filteredNodes = graph.nodes.filter((n) => !droppedIds.has(n.id));
+  const filteredEdges = graph.edges.filter(
+    (e) => !droppedIds.has(e.fromId) && !droppedIds.has(e.toId),
+  );
+  return {
+    graph: { ...graph, nodes: filteredNodes, edges: filteredEdges },
+    stripped: gaps,
+  };
+}

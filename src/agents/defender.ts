@@ -88,6 +88,7 @@ export async function defend(input: DefenderInput): Promise<DefenseDossier> {
     seed,
     format: DEFENSE_DOSSIER_JSON_SCHEMA,
     keepAlive: '15m',
+    maxTokens: 4096,
   });
   const defense = parseJsonResponse(result.text, DefenseDossier, 'defender');
   log.info('agent.done', {

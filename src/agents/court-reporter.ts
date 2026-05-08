@@ -116,6 +116,7 @@ export async function reportCourt(input: CourtReporterInput): Promise<ReporterEx
     images: attachments.map((a) => a.base64),
     format: REPORTER_EXHIBITS_JSON_SCHEMA,
     keepAlive: '15m',
+    maxTokens: 4096,
   });
   const llmExhibits = parseJsonResponse(result.text, ReporterExhibits, 'court-reporter');
   const merged: ReporterExhibits = {

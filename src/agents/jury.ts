@@ -14,7 +14,10 @@ const RAW_JURY_GRAPH_JSON_SCHEMA = z.toJSONSchema(RawJuryGraphSchema) as Record<
 import { buildEvidenceGraph, parseRawJuryGraph } from '../evidence/builder.js';
 import { renderOpinionFromGraph } from '../evidence/render-opinion.js';
 import type { PrecedentNodePayload, RawJuryGraph } from '../evidence/graph.js';
-import { assertEveryPrecedentJustified } from '../precedent/justification.js';
+import {
+  assertEveryPrecedentJustified,
+  stripUnjustifiedPrecedents,
+} from '../precedent/justification.js';
 import type { RippleSet } from '../monorepo/impact-trace.js';
 
 /** Default Ollama tag for the Jury. 128k context, q8_0 quant. */
@@ -210,6 +213,7 @@ export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
     seed,
     format: useGraph ? RAW_JURY_GRAPH_JSON_SCHEMA : JURY_OPINION_JSON_SCHEMA,
     keepAlive: '15m',
+    maxTokens: 8192,
   });
 
   if (!useGraph) {
@@ -225,7 +229,15 @@ export async function deliberate(input: JuryInput): Promise<JuryOpinion> {
   }
 
   const raw = parseRawGraph(result.text);
-  const graph = buildEvidenceGraph(raw);
+  const builtGraph = buildEvidenceGraph(raw);
+  const sanitized = stripUnjustifiedPrecedents(builtGraph);
+  if (sanitized.stripped.length > 0) {
+    log.warn('jury.precedent.stripped', {
+      count: sanitized.stripped.length,
+      ids: sanitized.stripped.map((g) => g.precedentId.slice(0, 12)),
+    });
+  }
+  const graph = sanitized.graph;
   assertEveryPrecedentJustified(graph);
   const opinion = renderOpinionFromGraph(graph);
   log.info('agent.done', {

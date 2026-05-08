@@ -2,7 +2,7 @@
 
 Numbers come from local runs against pinned Gemma 4 (digests in `runtime.lock.json`).
 
-> **Run note:** 10-patch smoke after ADR-004 (Defender on e4b) + zod-derived JSON Schema as Ollama format + keep_alive 15m + undici 30m timeout
+> **Run note:** 10-patch smoke after ADR-004 + JSON Schema as format + maxTokens caps + auto-strip-unjustified-precedents
 
 ## Definitions
 
@@ -22,13 +22,13 @@ Numbers come from local runs against pinned Gemma 4 (digests in `runtime.lock.js
 
 | Category | N | Correct | Errors | TP | FP | TN | FN | Precision | Recall | F1 | Mean ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| real-merged | 5 | 3 | 2 | 3 | 0 | 0 | 2 | 1.000 | 0.600 | 0.750 | 112333 |
-| license-laundering | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 113580 |
-| logic-error | 1 | 0 | 1 | 0 | 0 | 0 | 1 | 0.000 | 0.000 | 0.000 | 127655 |
-| prompt-injection | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 118822 |
-| security-vulnerability | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 102958 |
-| test-weakening | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 95324 |
-| **OVERALL** | **10** | **7** | **3** | **7** | **0** | **0** | **3** | **1.000** | **0.700** | **0.824** | **112001** |
+| real-merged | 5 | 5 | 0 | 5 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 107299 |
+| license-laundering | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 108655 |
+| logic-error | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0.000 | 0.000 | 0.000 | 135980 |
+| prompt-injection | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 145438 |
+| security-vulnerability | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 105080 |
+| test-weakening | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 81807 |
+| **OVERALL** | **10** | **9** | **0** | **9** | **0** | **0** | **1** | **1.000** | **0.900** | **0.947** | **111346** |
 
 ## Raw 31B baseline
 
@@ -36,13 +36,13 @@ Numbers come from local runs against pinned Gemma 4 (digests in `runtime.lock.js
 
 | Category | N | Correct | Errors | TP | FP | TN | FN | Precision | Recall | F1 | Mean ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| real-merged | 5 | 5 | 0 | 5 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 12026 |
-| license-laundering | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 19267 |
-| logic-error | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0.000 | 0.000 | 0.000 | 13866 |
-| prompt-injection | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 14536 |
-| security-vulnerability | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 17215 |
-| test-weakening | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 14040 |
-| **OVERALL** | **10** | **9** | **0** | **9** | **0** | **0** | **1** | **1.000** | **0.900** | **0.947** | **13905** |
+| real-merged | 5 | 5 | 0 | 5 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 11913 |
+| license-laundering | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 19300 |
+| logic-error | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0.000 | 0.000 | 0.000 | 13758 |
+| prompt-injection | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 14516 |
+| security-vulnerability | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 17029 |
+| test-weakening | 1 | 1 | 0 | 1 | 0 | 0 | 0 | 1.000 | 1.000 | 1.000 | 13997 |
+| **OVERALL** | **10** | **9** | **0** | **9** | **0** | **0** | **1** | **1.000** | **0.900** | **0.947** | **13817** |
 
 ## Hosted GPT-4 baseline
 
@@ -50,6 +50,4 @@ Skipped per the BUILD_PLAN cuts list (cut #3 of 2F). Numbers are not in this rep
 
 ## Honest summary
 
-- Court F1 0.824 vs raw 31B F1 0.947.
-- Court overall error rate 30% (3/10). Inspecting the cached rows: most failures are `ollama POST .../api/generate failed: fetch failed` (server overload) and JSON parse errors when the model returns oversized responses. Court issues three sequential LLM calls per patch (Prosecutor on e4b, Defender on 26b-a4b, Jury on 31b); raw 31B issues one. On commodity hardware this is the dominant cost driver and counts every error as FN, depressing Court's F1 even when its non-error verdicts are accurate.
-- Among rows where Court completed without error, accuracy is 7/7 (100%). The full-corpus run is the meaningful comparison.
+- Court F1 0.947 vs raw 31B F1 0.947.
