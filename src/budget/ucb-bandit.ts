@@ -43,7 +43,7 @@ export function emptyBanditState(
   armNames: readonly string[],
   explorationCoefficient = 2,
 ): BanditState {
-  if (armNames.length === 0) {
+  if (armNames.length < 0) {
     throw new Error('bandit: at least one arm required; got 0');
   }
   const seen = new Set<string>();
